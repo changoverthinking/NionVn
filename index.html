@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>NionVN — Từ điển Nhật-Việt Offline</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#28405f">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NionVN">
+<style>
+:root{
+  --paper:#f6f1e6;
+  --paper-2:#efe7d5;
+  --ink:#231f1a;
+  --ink-soft:#5b5347;
+  --indigo:#28405f;
+  --indigo-deep:#1b2b41;
+  --shu:#c1502e;
+  --shu-soft:#e0a98f;
+  --gold:#b68d40;
+  --line:#d8cdb4;
+  --card:#fffdf7;
+  --radius:10px;
+  --shadow:0 2px 10px rgba(35,31,26,.08);
+  --serif:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP","Georgia",serif;
+  --sans:"Hiragino Sans","Yu Gothic","Noto Sans JP","Segoe UI",system-ui,sans-serif;
+  --fs:16px;
+}
+[data-theme="dark"]{
+  --paper:#181613;
+  --paper-2:#211e19;
+  --ink:#ece6d9;
+  --ink-soft:#b3aa98;
+  --indigo:#7fa1c9;
+  --indigo-deep:#a9c3e2;
+  --shu:#e0724a;
+  --shu-soft:#5c3a2c;
+  --gold:#d4af6a;
+  --line:#3a352c;
+  --card:#211e19;
+  --shadow:0 2px 14px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;}
+html{font-size:var(--fs);}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--sans);
+  min-height:100vh;
+  transition:background .25s ease,color .25s ease;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:0;
+  background-image:repeating-linear-gradient(0deg,var(--ink) 0 1px,transparent 1px 26px);
+}
+h1,h2,h3{font-family:var(--serif);font-weight:600;margin:0 0 .4em;}
+button,input,select,textarea{font-family:inherit;font-size:1rem;color:inherit;}
+button{cursor:pointer;}
+a{color:var(--indigo);}
+
+/* ===== App shell ===== */
+#app{position:relative;z-index:1;max-width:960px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+
+header.topbar{
+  display:flex;align-items:center;gap:.7rem;padding:.9rem 1rem;
+  border-bottom:1px solid var(--line);background:var(--paper-2);position:sticky;top:0;z-index:20;
+}
+.brand{display:flex;align-items:center;gap:.6rem;flex:1;min-width:0;}
+.seal{
+  width:38px;height:38px;border-radius:50%;background:var(--shu);color:#fff8ef;
+  display:flex;align-items:center;justify-content:center;font-family:var(--serif);
+  font-size:1.15rem;flex:none;box-shadow:var(--shadow);
+}
+.brand-text{display:flex;flex-direction:column;line-height:1.1;min-width:0;}
+.brand-text b{font-family:var(--serif);font-size:1.15rem;letter-spacing:.02em;}
+.brand-text span{font-size:.72rem;color:var(--ink-soft);}
+.topbar-actions{display:flex;gap:.4rem;flex:none;}
+.icon-btn{
+  width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--card);
+  display:flex;align-items:center;justify-content:center;font-size:1rem;
+}
+.icon-btn:hover{border-color:var(--indigo);}
+
+nav.tabs{
+  display:flex;overflow-x:auto;gap:.15rem;padding:.4rem .6rem;background:var(--paper-2);
+  border-bottom:1px solid var(--line);position:sticky;top:64px;z-index:19;scrollbar-width:thin;
+}
+nav.tabs button{
+  flex:none;padding:.5rem .8rem;border:none;background:transparent;border-radius:8px 8px 0 0;
+  color:var(--ink-soft);font-size:.85rem;font-weight:600;white-space:nowrap;border-bottom:2px solid transparent;
+}
+nav.tabs button.active{color:var(--indigo-deep);border-bottom:2px solid var(--shu);background:var(--card);}
+
+main{flex:1;padding:1rem;padding-bottom:3rem;}
+.view{display:none;animation:fade .25s ease;}
+.view.active{display:block;}
+@keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:1rem;margin-bottom:.9rem;}
+.muted{color:var(--ink-soft);}
+.pill{display:inline-block;padding:.15rem .55rem;border-radius:999px;font-size:.7rem;font-weight:700;background:var(--paper-2);color:var(--ink-soft);border:1px solid var(--line);}
+.pill.level{color:#fff;border:none;}
+.lvl-N5{background:#5b8a5a;} .lvl-N4{background:#4a7fa5;} .lvl-N3{background:var(--gold);}
+.lvl-N2{background:#a0603a;} .lvl-N1{background:var(--shu);} .lvl-chuyennganh{background:#5a4a8a;}
+
+/* search */
+.search-row{display:flex;gap:.5rem;margin-bottom:.7rem;flex-wrap:wrap;}
+.search-row input[type=text]{flex:1;min-width:180px;padding:.75rem .9rem;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);}
+.search-row input[type=text]:focus{outline:2px solid var(--indigo);outline-offset:1px;}
+.btn{padding:.7rem 1rem;border-radius:8px;border:1px solid var(--line);background:var(--card);font-weight:600;}
+.btn.primary{background:var(--indigo);border-color:var(--indigo);color:#fdf9ef;}
+.btn.accent{background:var(--shu);border-color:var(--shu);color:#fff8ef;}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.chip-row{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.7rem;}
+.chip{padding:.35rem .7rem;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:.8rem;}
+.chip.on{background:var(--indigo);border-color:var(--indigo);color:#fff;}
+
+.word-title{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;}
+.word-title .jp{font-family:var(--serif);font-size:1.5rem;}
+.word-title .kana{color:var(--ink-soft);font-size:1rem;}
+.word-title .romaji{color:var(--indigo);font-size:.85rem;}
+.meaning-list{margin:.4rem 0;padding-left:1.1rem;}
+.example{background:var(--paper-2);border-left:3px solid var(--gold);padding:.5rem .7rem;border-radius:6px;margin:.35rem 0;}
+.example .jp{font-family:var(--serif);}
+.row-actions{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;}
+.row-actions button{padding:.4rem .6rem;border-radius:6px;border:1px solid var(--line);background:var(--card);font-size:.85rem;}
+.row-actions button.active{background:var(--shu-soft);border-color:var(--shu);}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.6rem;}
+.kanji-tile{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:.7rem;text-align:center;box-shadow:var(--shadow);}
+.kanji-tile .big{font-family:var(--serif);font-size:2rem;}
+.kanji-tile .m{font-size:.75rem;color:var(--ink-soft);}
+
+.empty{text-align:center;padding:2.5rem 1rem;color:var(--ink-soft);}
+.empty .big-ico{font-size:2.4rem;display:block;margin-bottom:.5rem;}
+
+textarea.note{width:100%;min-height:70px;border:1px solid var(--line);border-radius:8px;padding:.6rem;background:var(--paper-2);color:var(--ink);}
+
+.flashcard-wrap{display:flex;flex-direction:column;align-items:center;gap:1rem;padding:1rem 0;}
+.flashcard{width:100%;max-width:420px;min-height:220px;border-radius:16px;background:var(--card);border:1px solid var(--line);
+  box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;flex-direction:column;padding:1.4rem;text-align:center;cursor:pointer;user-select:none;}
+.flashcard .jp{font-family:var(--serif);font-size:2rem;}
+.flashcard .sub{color:var(--ink-soft);margin-top:.5rem;}
+.fc-controls{display:flex;gap:.6rem;}
+.fc-progress{font-size:.8rem;color:var(--ink-soft);}
+
+.quiz-q{font-size:1.1rem;margin-bottom:.8rem;}
+.quiz-opt{display:block;width:100%;text-align:left;padding:.7rem .9rem;margin-bottom:.5rem;border-radius:8px;border:1px solid var(--line);background:var(--card);}
+.quiz-opt.correct{background:#5b8a5a33;border-color:#5b8a5a;}
+.quiz-opt.wrong{background:var(--shu-soft);border-color:var(--shu);}
+
+table.settings-table{width:100%;border-collapse:collapse;}
+table.settings-table td{padding:.6rem 0;border-bottom:1px solid var(--line);}
+
+.reading-text{font-family:var(--serif);font-size:1.15rem;line-height:2.1;}
+.reading-text span.tapword{cursor:pointer;border-bottom:1px dashed var(--indigo);}
+.reading-text span.tapword:hover{background:var(--paper-2);}
+
+.section-title{display:flex;align-items:center;gap:.5rem;margin:1.1rem 0 .5rem;}
+.section-title::after{content:"";flex:1;height:1px;background:var(--line);}
+
+footer.bottom-nav{display:none;}
+@media (max-width:640px){
+  header.topbar{padding:.6rem .7rem;}
+  nav.tabs{top:58px;}
+  main{padding:.7rem;}
+}
+.hidden{display:none !important;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;}
+@media(max-width:520px){.two-col{grid-template-columns:1fr;}}
+
+.toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--indigo-deep);color:#fdf9ef;
+  padding:.6rem 1rem;border-radius:8px;font-size:.85rem;box-shadow:var(--shadow);z-index:100;opacity:0;pointer-events:none;transition:opacity .3s ease;}
+.toast.show{opacity:1;}
+
+.mic-btn.listening{background:var(--shu);color:#fff;border-color:var(--shu);animation:pulse 1.1s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(193,80,46,.5);}70%{box-shadow:0 0 0 10px rgba(193,80,46,0);}100%{box-shadow:0 0 0 0 rgba(193,80,46,0);}}
+</style>
+</head>
+<body data-theme="light">
+<div id="app">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="seal">忍</div>
+    <div class="brand-text"><b>NionVN</b><span>Từ điển Nhật ⇄ Việt · Offline</span></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" title="Đổi giao diện sáng/tối">🌙</button>
+    <button class="icon-btn" id="langToggle" title="VI/EN">VI</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="dict" class="active">📖 Từ điển</button>
+  <button data-view="kanji">漢 Kanji</button>
+  <button data-view="grammar">📝 Ngữ pháp</button>
+  <button data-view="translate">🔁 Dịch</button>
+  <button data-view="vocab">🗂 Từ vựng</button>
+  <button data-view="mywords">➕ Thêm nội dung</button>
+  <button data-view="flashcard">🎴 Flashcard</button>
+  <button data-view="jlpt">🎯 JLPT</button>
+  <button data-view="reading">📰 Luyện đọc</button>
+  <button data-view="me">⭐ Của tôi</button>
+  <button data-view="settings">⚙️ Cài đặt</button>
+</nav>
+
+<main id="main">
+
+<!-- DICTIONARY VIEW -->
+<section class="view active" id="view-dict">
+  <div class="search-row">
+    <input type="text" id="dictInput" placeholder="Nhập Kanji, Hiragana, Katakana, Romaji hoặc tiếng Việt…">
+    <button class="btn mic-btn" id="dictMic" title="Tìm bằng giọng nói">🎤</button>
+    <button class="btn primary" id="dictSearchBtn">Tra từ</button>
+  </div>
+  <div class="chip-row" id="dictDirRow">
+    <button class="chip on" data-dir="any">Tự động</button>
+    <button class="chip" data-dir="jv">Nhật → Việt</button>
+    <button class="chip" data-dir="vj">Việt → Nhật</button>
+  </div>
+  <div id="dictResults"></div>
+</section>
+
+<!-- KANJI VIEW -->
+<section class="view" id="view-kanji">
+  <div class="search-row">
+    <input type="text" id="kanjiInput" placeholder="Nhập chữ Kanji, âm On/Kun, hoặc nghĩa…">
+    <button class="btn primary" id="kanjiSearchBtn">Tra Kanji</button>
+  </div>
+  <div class="chip-row" id="kanjiLevelRow">
+    <button class="chip on" data-lvl="all">Tất cả</button>
+    <button class="chip" data-lvl="N5">N5</button>
+    <button class="chip" data-lvl="N4">N4</button>
+    <button class="chip" data-lvl="N3">N3</button>
+    <button class="chip" data-lvl="N2">N2</button>
+    <button class="chip" data-lvl="N1">N1</button>
+  </div>
+  <div class="card" style="margin-bottom:.9rem;">
+    <b>✍️ Viết tay tìm Kanji</b>
+    <p class="muted" style="margin:.3rem 0 .6rem;font-size:.85rem;">Vẽ nét Kanji vào khung dưới đây (nhận diện đơn giản theo số nét vẽ).</p>
+    <canvas id="handwriteCanvas" width="260" height="260" style="border:1px solid var(--line);border-radius:8px;background:var(--card);touch-action:none;max-width:100%;"></canvas>
+    <div class="row-actions">
+      <button id="hwClear">🗑 Xóa</button>
+      <button id="hwGuess">🔍 Đoán Kanji</button>
+    </div>
+    <div id="hwResult" class="muted" style="margin-top:.4rem;font-size:.85rem;"></div>
+  </div>
+  <div id="kanjiResults" class="grid"></div>
+</section>
+
+<!-- GRAMMAR VIEW -->
+<section class="view" id="view-grammar">
+  <div class="search-row">
+    <input type="text" id="grammarInput" placeholder="Tìm mẫu ngữ pháp, ví dụ: たら / ば / なければ…">
+    <button class="btn primary" id="grammarSearchBtn">Tìm</button>
+  </div>
+  <div class="chip-row" id="grammarLevelRow">
+    <button class="chip on" data-lvl="all">Tất cả</button>
+    <button class="chip" data-lvl="N5">N5</button>
+    <button class="chip" data-lvl="N4">N4</button>
+    <button class="chip" data-lvl="N3">N3</button>
+    <button class="chip" data-lvl="N2">N2</button>
+    <button class="chip" data-lvl="N1">N1</button>
+  </div>
+  <div id="grammarResults"></div>
+</section>
+
+<!-- TRANSLATE VIEW -->
+<section class="view" id="view-translate">
+  <div class="card">
+    <div class="chip-row">
+      <button class="chip on" data-tdir="jv">日 → VI</button>
+      <button class="chip" data-tdir="vj">VI → 日</button>
+    </div>
+    <textarea class="note" id="translateInput" placeholder="Nhập câu hoặc đoạn văn cần dịch… (bản demo dịch theo từ có trong từ điển)" style="min-height:110px;"></textarea>
+    <div class="row-actions">
+      <button class="btn primary" id="translateBtn">Dịch</button>
+      <button id="translateSpeak">🔊 Đọc</button>
+      <label class="btn" style="cursor:pointer;">📷 Dịch từ ảnh (OCR)
+        <input type="file" id="ocrInput" accept="image/*" class="hidden">
+      </label>
+    </div>
+    <div id="ocrNote" class="muted" style="font-size:.8rem;margin-top:.4rem;"></div>
+  </div>
+  <div class="card" id="translateOutputCard" style="display:none;">
+    <b>Kết quả (ghép nghĩa theo từ):</b>
+    <p id="translateOutput" style="margin-top:.5rem;"></p>
+    <p class="muted" style="font-size:.78rem;">* Từ tô đậm = nhận diện được trong từ điển offline. Từ trong ngoặc [ ] = chưa có trong dữ liệu offline hiện tại. Đây là bản dịch ghép từ điển, không phải dịch máy AI theo ngữ cảnh.</p>
+  </div>
+</section>
+
+<!-- VOCAB LEARNING VIEW -->
+<section class="view" id="view-vocab">
+  <div class="chip-row" id="vocabLevelRow">
+    <button class="chip on" data-lvl="all">Tất cả</button>
+    <button class="chip" data-lvl="N5">N5</button>
+    <button class="chip" data-lvl="N4">N4</button>
+    <button class="chip" data-lvl="N3">N3</button>
+    <button class="chip" data-lvl="N2">N2</button>
+    <button class="chip" data-lvl="N1">N1</button>
+    <button class="chip" data-lvl="Chuyên ngành">🔧 Chuyên ngành</button>
+  </div>
+  <div class="chip-row" id="vocabTopicRow"></div>
+  <div id="vocabResults" class="grid" style="grid-template-columns:1fr;"></div>
+</section>
+
+<!-- FLASHCARD VIEW -->
+<section class="view" id="view-flashcard">
+  <div class="card">
+    <b>Bộ flashcard</b>
+    <div class="row-actions" style="margin-top:.5rem;">
+      <button class="btn" data-deck="favorites">⭐ Từ yêu thích</button>
+      <button class="btn" data-deck="mylist">🗂 Danh sách của tôi</button>
+      <button class="btn" data-deck="custom">➕ Từ tôi tự thêm</button>
+      <button class="btn" data-deck="N5">N5</button>
+      <button class="btn" data-deck="N4">N4</button>
+      <button class="btn" data-deck="N3">N3</button>
+    </div>
+  </div>
+  <div id="flashcardArea"></div>
+</section>
+
+<!-- JLPT PRACTICE VIEW -->
+<section class="view" id="view-jlpt">
+  <div class="card" id="jlptSetup">
+    <b>Luyện thi JLPT</b>
+    <p class="muted" style="font-size:.85rem;">Chọn cấp độ và loại bài luyện.</p>
+    <div class="chip-row" id="jlptLevelRow">
+      <button class="chip on" data-lvl="N5">N5</button>
+      <button class="chip" data-lvl="N4">N4</button>
+      <button class="chip" data-lvl="N3">N3</button>
+      <button class="chip" data-lvl="N2">N2</button>
+      <button class="chip" data-lvl="N1">N1</button>
+    </div>
+    <div class="chip-row" id="jlptTypeRow">
+      <button class="chip on" data-type="vocab">Từ vựng</button>
+      <button class="chip" data-type="kanji">Kanji</button>
+      <button class="chip" data-type="grammar">Ngữ pháp</button>
+    </div>
+    <button class="btn accent" id="jlptStart">Bắt đầu luyện đề</button>
+  </div>
+  <div id="jlptArea"></div>
+</section>
+
+<!-- READING VIEW -->
+<section class="view" id="view-reading">
+  <div class="chip-row" id="readingList"></div>
+  <div id="readingArea"></div>
+</section>
+
+<!-- ME / HISTORY VIEW -->
+<section class="view" id="view-me">
+  <div class="chip-row">
+    <button class="chip on" data-metab="history">🕘 Lịch sử</button>
+    <button class="chip" data-metab="favorites">⭐ Yêu thích</button>
+    <button class="chip" data-metab="mylist">🗂 Danh sách học</button>
+    <button class="chip" data-metab="notes">📝 Ghi chú</button>
+  </div>
+  <div id="meArea"></div>
+</section>
+
+<!-- SETTINGS VIEW -->
+<section class="view" id="view-settings">
+  <div class="card">
+    <h3>Giao diện</h3>
+    <table class="settings-table">
+      <tr><td>Chế độ tối</td><td><input type="checkbox" id="setDark"></td></tr>
+      <tr><td>Cỡ chữ lớn</td><td><input type="checkbox" id="setBigFont"></td></tr>
+      <tr><td>Ngôn ngữ giao diện</td><td>
+        <select id="setLang"><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
+      </td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Dữ liệu cá nhân</h3>
+    <p class="muted" style="font-size:.85rem;">NionVN <b>tự động lưu</b> lịch sử, từ yêu thích, danh sách học và ghi chú ngay trên trình duyệt của máy bạn (localStorage) — mở lại app là dữ liệu vẫn còn, không cần nhập lại. Dữ liệu chỉ nằm trên máy bạn, không gửi đi đâu cả. Nút xuất/nhập bên dưới dùng để sao lưu hoặc chuyển dữ liệu sang máy/trình duyệt khác.</p>
+    <div class="row-actions">
+      <button class="btn primary" id="exportData">⬇️ Xuất dữ liệu (.json)</button>
+      <label class="btn" style="cursor:pointer;">⬆️ Nhập dữ liệu
+        <input type="file" id="importData" accept="application/json" class="hidden">
+      </label>
+      <button class="btn" id="clearData">🗑 Xóa toàn bộ dữ liệu cá nhân</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Về NionVN</h3>
+    <p class="muted" style="font-size:.85rem;">NionVN là ứng dụng từ điển Nhật-Việt hoạt động hoàn toàn offline, chạy trực tiếp trong trình duyệt — không cần cài đặt, không cần Internet để tra từ, Kanji, ngữ pháp, học flashcard hay luyện JLPT. Phát âm và nhận diện giọng nói sử dụng công nghệ có sẵn của trình duyệt/hệ điều hành.</p>
+  </div>
+</section>
+
+<!-- MY WORDS (custom vocab + grammar import) VIEW -->
+<section class="view" id="view-mywords">
+  <div class="chip-row" id="mwTypeRow">
+    <button class="chip on" data-mwtype="vocab">📖 Từ vựng</button>
+    <button class="chip" data-mwtype="grammar">📝 Ngữ pháp</button>
+  </div>
+
+  <div id="mwVocabPane">
+  <div class="card">
+    <h3>➕ Thêm từ vào từ điển của bạn</h3>
+    <p class="muted" style="font-size:.85rem;">Đang học theo Minna no Nihongo, Quartet, Shin Kanzen Master, TRY! JLPT, Sou Matome, sách thuật ngữ chuyên ngành… hay bất kỳ tài liệu nào? Bạn tự gõ lại từ và ví dụ bạn đang học vào đây — từ sẽ được lưu vĩnh viễn trên máy bạn và xuất hiện trong Tra từ, Từ vựng, Flashcard như từ điển gốc. (NionVN không tự sao chép nội dung sách vì lý do bản quyền, nhưng việc bạn tự nhập từ mình đang học thì hoàn toàn không sao.)</p>
+    <div class="two-col">
+      <input type="text" id="mwKanji" placeholder="Kanji/chữ viết (VD: 頑張る)">
+      <input type="text" id="mwHira" placeholder="Hiragana (VD: がんばる)">
+      <input type="text" id="mwRomaji" placeholder="Romaji (VD: ganbaru)">
+      <input type="text" id="mwLevel" placeholder="Cấp độ / Nguồn (VD: Minna N4, Bài 12)">
+    </div>
+    <input type="text" id="mwVi" placeholder="Nghĩa tiếng Việt (cách nhau bởi ;)" style="width:100%;margin-top:.5rem;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);">
+    <textarea class="note" id="mwExample" placeholder="Câu ví dụ (JP) — Nghĩa (VI), mỗi ví dụ một dòng" style="margin-top:.5rem;"></textarea>
+    <div class="row-actions">
+      <button class="btn primary" id="mwAddBtn">💾 Lưu từ này</button>
+      <button id="mwClearForm">Xóa form</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📋 Nhập hàng loạt (CSV)</h3>
+    <p class="muted" style="font-size:.85rem;">Mỗi dòng một từ, theo định dạng: <code>Kanji|Hiragana|Romaji|Nghĩa VI|Cấp độ/Nguồn</code> — ví dụ: <br><code>頑張る|がんばる|ganbaru|cố gắng|Minna N4</code></p>
+    <textarea class="note" id="mwBulk" placeholder="頑張る|がんばる|ganbaru|cố gắng|Minna N4&#10;諦める|あきらめる|akirameru|từ bỏ|Minna N4" style="min-height:110px;"></textarea>
+    <div class="row-actions">
+      <button class="btn accent" id="mwBulkBtn">📥 Nhập hàng loạt</button>
+    </div>
+    <div id="mwBulkResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
+  </div>
+
+  <div class="section-title"><span>Từ bạn đã thêm</span></div>
+  <div id="mywordsList"></div>
+  </div>
+
+  <div id="mwGrammarPane" class="hidden">
+  <div class="card">
+    <h3>➕ Thêm mẫu ngữ pháp</h3>
+    <p class="muted" style="font-size:.85rem;">Gõ lại mẫu ngữ pháp bạn đang học (từ Shin Kanzen Master, TRY!, Sou Matome, Dictionary of Japanese Grammar…) theo lời văn của bạn.</p>
+    <div class="two-col">
+      <input type="text" id="mgPattern" placeholder="Mẫu ngữ pháp (VD: 〜たばかり)">
+      <input type="text" id="mgLevel" placeholder="Cấp độ / Nguồn (VD: Kanzen Master N3)">
+    </div>
+    <input type="text" id="mgMeaning" placeholder="Ý nghĩa (VD: vừa mới làm gì)" style="width:100%;margin-top:.5rem;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);">
+    <input type="text" id="mgStructure" placeholder="Cấu trúc (VD: V-た + ばかり)" style="width:100%;margin-top:.5rem;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);">
+    <textarea class="note" id="mgUsage" placeholder="Cách dùng (giải thích ngắn gọn theo lời bạn)" style="margin-top:.5rem;min-height:60px;"></textarea>
+    <textarea class="note" id="mgExample" placeholder="Câu ví dụ (JP) — Nghĩa (VI), mỗi ví dụ một dòng" style="margin-top:.5rem;"></textarea>
+    <div class="row-actions">
+      <button class="btn primary" id="mgAddBtn">💾 Lưu mẫu này</button>
+      <button id="mgClearForm">Xóa form</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📋 Nhập hàng loạt (CSV)</h3>
+    <p class="muted" style="font-size:.85rem;">Mỗi dòng một mẫu, theo định dạng: <code>Mẫu|Ý nghĩa|Cấu trúc|Cách dùng|Cấp độ/Nguồn</code> — ví dụ: <br><code>〜たばかり|vừa mới làm gì|V-た + ばかり|Diễn tả hành động vừa hoàn thành|Kanzen Master N3</code></p>
+    <textarea class="note" id="mgBulk" placeholder="〜たばかり|vừa mới làm gì|V-た + ばかり|Diễn tả hành động vừa hoàn thành|Kanzen Master N3" style="min-height:110px;"></textarea>
+    <div class="row-actions">
+      <button class="btn accent" id="mgBulkBtn">📥 Nhập hàng loạt</button>
+    </div>
+    <div id="mgBulkResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
+  </div>
+
+  <div class="section-title"><span>Ngữ pháp bạn đã thêm</span></div>
+  <div id="mygrammarList"></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(()=>{});
+    });
+  }
+</script>
+</body>
+</html>
