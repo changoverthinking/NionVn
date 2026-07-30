@@ -58,9 +58,21 @@ function loadFromStorage(){
 function vkey(v){ return (v.kanji||"")+"|"+(v.hira||""); }
 function kkey(k){ return k.char; }
 function levelSlug(lvl){ return (lvl||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,""); }
-function allVocab(){ return [...VOCAB_CLEAN, ...(typeof IMPORTED_VOCAB!=="undefined"?IMPORTED_VOCAB:[]), ...state.customVocab]; }
+function allVocab(){
+  const map = new Map();
+  (typeof IMPORTED_VOCAB!=="undefined"?IMPORTED_VOCAB:[]).forEach(v=>map.set(vkey(v), v));
+  VOCAB_CLEAN.forEach(v=>map.set(vkey(v), v));
+  state.customVocab.forEach(v=>map.set(vkey(v), v)); // từ đã sửa/thêm luôn được ưu tiên, ghi đè bản gốc
+  return [...map.values()];
+}
 function allGrammar(){ return [...GRAMMAR, ...state.customGrammar]; }
-function allKanji(){ return [...KANJI_CLEAN, ...(typeof IMPORTED_KANJI!=="undefined"?IMPORTED_KANJI:[]), ...state.customKanji]; }
+function allKanji(){
+  const map = new Map();
+  (typeof IMPORTED_KANJI!=="undefined"?IMPORTED_KANJI:[]).forEach(k=>map.set(k.char, k));
+  KANJI_CLEAN.forEach(k=>map.set(k.char, k));
+  state.customKanji.forEach(k=>map.set(k.char, k)); // kanji đã sửa/thêm luôn được ưu tiên
+  return [...map.values()];
+}
 
 function toast(msg){
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
