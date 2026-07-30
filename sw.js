@@ -1,8 +1,9 @@
-const CACHE_NAME = "nionvn-cache-v1";
+const CACHE_NAME = "nionvn-cache-v2";
 const ASSETS = [
   "./",
   "./index.html",
   "./data.js",
+  "./imported-data.js",
   "./app.js",
   "./manifest.json",
   "./icons/icon-192.png",

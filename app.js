@@ -11,6 +11,7 @@ const state = {
   fc:{},                  // key -> {box:0-4}
   customVocab:[],          // từ do người dùng tự thêm (từ sách của họ)
   customGrammar:[],         // mẫu ngữ pháp do người dùng tự thêm
+  customKanji:[],            // kanji do người dùng tự thêm/sửa
   settings:{theme:"light", bigfont:false, lang:"vi"},
   dictDir:"any",
   jlpt:{level:"N5", type:"vocab", questions:[], idx:0, score:0, active:false},
@@ -33,7 +34,7 @@ function scheduleSave(){
 }
 function saveToStorage(){
   try{
-    const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar};
+    const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji};
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }catch(e){ /* storage full or unavailable - silently ignore, Export/Import still works */ }
 }
@@ -49,6 +50,7 @@ function loadFromStorage(){
     state.history = data.history || [];
     state.customVocab = data.customVocab || [];
     state.customGrammar = data.customGrammar || [];
+    state.customKanji = data.customKanji || [];
     state.settings = Object.assign(state.settings, data.settings||{});
   }catch(e){ /* corrupted data - start fresh */ }
 }
@@ -56,8 +58,9 @@ function loadFromStorage(){
 function vkey(v){ return (v.kanji||"")+"|"+(v.hira||""); }
 function kkey(k){ return k.char; }
 function levelSlug(lvl){ return (lvl||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]/g,""); }
-function allVocab(){ return [...VOCAB_CLEAN, ...state.customVocab]; }
+function allVocab(){ return [...VOCAB_CLEAN, ...(typeof IMPORTED_VOCAB!=="undefined"?IMPORTED_VOCAB:[]), ...state.customVocab]; }
 function allGrammar(){ return [...GRAMMAR, ...state.customGrammar]; }
+function allKanji(){ return [...KANJI_CLEAN, ...(typeof IMPORTED_KANJI!=="undefined"?IMPORTED_KANJI:[]), ...state.customKanji]; }
 
 function toast(msg){
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
@@ -121,20 +124,21 @@ function wordCardHTML(v){
   const isFav = !!state.favorites[key];
   const isList = !!state.mylist[key];
   const note = state.notes[key] || "";
+  const hasMeaning = v.vi && v.vi.length>0;
   return `
   <div class="card" data-key="${escapeAttr(key)}">
     <div class="word-title">
       <span class="jp">${v.kanji}</span>
       <span class="kana">${v.hira}${v.kata? " / "+v.kata:""}</span>
-      <span class="romaji">${v.romaji}</span>
+      <span class="romaji">${v.romaji||""}</span>
       <span class="pill level lvl-${levelSlug(v.level)}">${v.level}</span>
-      <span class="pill">${v.pos}</span>
+      ${v.pos? `<span class="pill">${v.pos}</span>`:""}
     </div>
     <div class="muted" style="font-size:.8rem;margin-top:.2rem;">${v.topic||""}</div>
-    <div style="margin-top:.5rem;"><b>Nghĩa (VI):</b> ${v.vi.join("; ")}</div>
-    ${v.en.length? `<div><b>Nghĩa (EN):</b> ${v.en.join("; ")}</div>`:""}
+    <div style="margin-top:.5rem;"><b>Nghĩa (VI):</b> ${hasMeaning? v.vi.join("; ") : `<span class="muted">(chưa có nghĩa — dữ liệu nhập từ CSV)</span>`}</div>
+    ${v.en && v.en.length? `<div><b>Nghĩa (EN):</b> ${v.en.join("; ")}</div>`:""}
     ${v.jp? `<div class="muted" style="margin-top:.3rem;"><b>日本語:</b> ${v.jp}</div>`:""}
-    ${v.examples.map(ex=>`<div class="example"><div class="jp">${ex.jp}</div><div class="muted">${ex.romaji}</div><div>${ex.vi}</div></div>`).join("")}
+    ${(v.examples||[]).map(ex=>`<div class="example"><div class="jp">${ex.jp}</div><div class="muted">${ex.romaji||""}</div><div>${ex.vi}</div></div>`).join("")}
     ${v.synonyms && v.synonyms.length? `<div style="margin-top:.3rem;"><b>Đồng nghĩa/liên quan:</b> ${v.synonyms.join(", ")}</div>`:""}
     ${v.compounds && v.compounds.length? `<div><b>Từ ghép:</b> ${v.compounds.join(", ")}</div>`:""}
     <div class="row-actions">
@@ -142,6 +146,7 @@ function wordCardHTML(v){
       <button class="act-img">🖼 Hình ảnh liên quan</button>
       <button class="act-fav ${isFav?'active':''}">${isFav? '★ Đã lưu':'☆ Yêu thích'}</button>
       <button class="act-list ${isList?'active':''}">${isList? '✓ Trong danh sách':'+ Thêm vào danh sách học'}</button>
+      ${!hasMeaning? `<button onclick="window.editVocabPrompt('${escapeAttr(key)}')">✏️ Bổ sung nghĩa</button>`:""}
     </div>
     <textarea class="note" placeholder="Ghi chú cá nhân của bạn về từ này…">${escapeHtml(note)}</textarea>
   </div>`;
@@ -176,7 +181,10 @@ function bindWordCardActions(container){
 function renderDictResults(list){
   const box = $("#dictResults");
   if(!list.length){ box.innerHTML = `<div class="empty"><span class="big-ico">🔍</span>Không tìm thấy kết quả. Thử từ khóa khác nhé.</div>`; return; }
-  box.innerHTML = list.map(wordCardHTML).join("");
+  const CAP = 60;
+  const shown = list.slice(0, CAP);
+  box.innerHTML = shown.map(wordCardHTML).join("") +
+    (list.length>CAP? `<div class="muted" style="text-align:center;padding:.6rem;">Tìm thấy ${list.length} kết quả, đang hiện ${CAP} kết quả đầu. Hãy gõ từ khóa cụ thể hơn để thu hẹp.</div>` : "");
   bindWordCardActions(box);
 }
 
@@ -192,43 +200,50 @@ function doDictSearch(){
 function kanjiCardHTML(k){
   return `<div class="kanji-tile" data-char="${k.char}">
     <div class="big">${k.char}</div>
-    <div class="m">${k.meaning}</div>
-    <div class="pill level lvl-${k.level}" style="margin-top:.3rem;">${k.level}</div>
+    <div class="m">${k.meaning || (k.imported? "(chưa có nghĩa)" : "")}</div>
+    <div class="pill level lvl-${levelSlug(k.level)}" style="margin-top:.3rem;">${k.level}</div>
   </div>`;
 }
 function kanjiDetailHTML(k){
   return `<div class="card">
     <div class="word-title"><span class="jp" style="font-size:2.2rem;">${k.char}</span>
-      <span class="pill level lvl-${k.level}">${k.level}</span><span class="pill">${k.strokes} nét</span><span class="pill">Bộ: ${k.radical}</span></div>
-    <div style="margin-top:.4rem;"><b>Nghĩa:</b> ${k.meaning}</div>
-    <div><b>Âm On'yomi:</b> ${k.onyomi.join("、")||"—"}</div>
-    <div><b>Âm Kun'yomi:</b> ${k.kunyomi.join("、")||"—"}</div>
-    ${k.compounds.length? `<div style="margin-top:.4rem;"><b>Từ ghép:</b>${k.compounds.map(c=>`<div class="example"><span class="jp">${c.word}</span> (${c.reading}) — ${c.meaning}</div>`).join("")}</div>`:""}
-    <div class="row-actions"><button onclick="window.speakJP('${k.char}')">🔊 Phát âm</button></div>
+      <span class="pill level lvl-${levelSlug(k.level)}">${k.level}</span><span class="pill">${k.strokes||"?"} nét</span><span class="pill">Bộ: ${k.radical||"?"}</span></div>
+    <div style="margin-top:.4rem;"><b>Nghĩa:</b> ${k.meaning || `<span class="muted">(chưa có nghĩa — dữ liệu nhập từ CSV, vào Công cụ để bổ sung)</span>`}</div>
+    <div><b>Âm On'yomi:</b> ${(k.onyomi||[]).join("、")||"—"}</div>
+    <div><b>Âm Kun'yomi:</b> ${(k.kunyomi||[]).join("、")||"—"}</div>
+    ${(k.compounds||[]).length? `<div style="margin-top:.4rem;"><b>Từ ghép:</b>${k.compounds.map(c=>`<div class="example"><span class="jp">${c.word}</span> (${c.reading}) — ${c.meaning}</div>`).join("")}</div>`:""}
+    <div class="row-actions"><button onclick="window.speakJP('${k.char}')">🔊 Phát âm</button>${k.imported? `<button onclick="window.editKanjiPrompt('${k.char}')">✏️ Bổ sung nghĩa</button>`:""}</div>
   </div>`;
 }
 window.speakJP = (t)=>speak(t,"ja-JP");
+window.editKanjiPrompt = (ch)=>{ showView("tools"); $$("#toolsSubRow .chip").forEach(c=>c.classList.toggle("on", c.dataset.tsub==="edit")); $$(".tools-pane").forEach(p=>p.classList.add("hidden")); $("#tools-edit").classList.remove("hidden"); openEditTableFor("kanji", ch); };
 
 let kanjiLevelFilter = "all";
-function renderKanjiList(){
+let kanjiPageSize = 120, kanjiShown = 120;
+function renderKanjiList(reset=true){
+  if(reset) kanjiShown = kanjiPageSize;
   const q = normalize($("#kanjiInput").value);
-  let list = KANJI_CLEAN.filter(k=>{
+  let list = allKanji().filter(k=>{
     if(kanjiLevelFilter!=="all" && k.level!==kanjiLevelFilter) return false;
     if(!q) return true;
-    return k.char.includes(q) || k.meaning.toLowerCase().includes(q) ||
-      k.onyomi.join(" ").toLowerCase().includes(q) || k.kunyomi.join(" ").toLowerCase().includes(q);
+    return k.char.includes(q) || (k.meaning||"").toLowerCase().includes(q) ||
+      (k.onyomi||[]).join(" ").toLowerCase().includes(q) || (k.kunyomi||[]).join(" ").toLowerCase().includes(q);
   });
   const box = $("#kanjiResults");
   if(!list.length){ box.innerHTML = `<div class="empty"><span class="big-ico">漢</span>Không tìm thấy Kanji phù hợp.</div>`; return; }
-  box.innerHTML = list.map(kanjiCardHTML).join("");
+  const shown = list.slice(0, kanjiShown);
+  const more = list.length - shown.length;
+  box.innerHTML = shown.map(kanjiCardHTML).join("") +
+    (more>0? `<div style="grid-column:1/-1;text-align:center;padding:.8rem;"><button class="btn" id="kanjiLoadMore">Tải thêm (${more} còn lại)</button></div>` : `<div style="grid-column:1/-1;text-align:center;" class="muted">Đã hiện tất cả ${list.length} Kanji.</div>`);
   $$(".kanji-tile", box).forEach(tile=>{
     tile.addEventListener("click",()=>{
-      const k = KANJI_CLEAN.find(k=>k.char===tile.dataset.char);
+      const k = allKanji().find(k=>k.char===tile.dataset.char);
       box.insertAdjacentHTML("beforebegin", kanjiDetailHTML(k));
       logHistory("kanji", k.char);
       $("main").scrollIntoView({behavior:"smooth"});
     });
   });
+  $("#kanjiLoadMore")?.addEventListener("click",()=>{ kanjiShown += kanjiPageSize; renderKanjiList(false); });
 }
 
 /* Handwriting canvas (simple stroke-count based matching) */
@@ -250,7 +265,7 @@ function setupHandwriting(){
   $("#hwClear").addEventListener("click",()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); strokeCount=0; $("#hwResult").textContent=""; });
   $("#hwGuess").addEventListener("click",()=>{
     if(strokeCount===0){ $("#hwResult").textContent = "Hãy vẽ một chữ Kanji trước."; return; }
-    const candidates = KANJI_CLEAN.filter(k=>Math.abs(k.strokes-strokeCount)<=1).sort((a,b)=>Math.abs(a.strokes-strokeCount)-Math.abs(b.strokes-strokeCount)).slice(0,8);
+    const candidates = allKanji().filter(k=>Math.abs(k.strokes-strokeCount)<=1).sort((a,b)=>Math.abs(a.strokes-strokeCount)-Math.abs(b.strokes-strokeCount)).slice(0,8);
     if(!candidates.length){ $("#hwResult").textContent = "Không tìm thấy gợi ý phù hợp."; return; }
     $("#hwResult").innerHTML = "Gợi ý theo số nét vẽ được ("+strokeCount+" nét) — độ chính xác giới hạn trong bản offline: "+
       candidates.map(k=>`<span class="jp" style="font-size:1.3rem;cursor:pointer;margin-right:.4rem;" data-c="${k.char}">${k.char}</span>`).join("");
@@ -284,36 +299,141 @@ function renderGrammar(){
   box.innerHTML = list.length? list.map(grammarCardHTML).join("") : `<div class="empty"><span class="big-ico">📝</span>Không tìm thấy mẫu ngữ pháp phù hợp.</div>`;
 }
 
-/* ============ TRANSLATE (demo, dictionary-based gloss) ============ */
+/* ============ TRANSLATE (câu — có giải chia động từ + liên kết ngữ pháp) ============ */
 let tdir = "jv";
+
+/* -- Bộ giải chia động từ/tính từ đơn giản (không phải AI, dựa trên quy tắc ngữ pháp) -- */
+function deinflectCandidates(word){
+  const iToU = {"い":"う","き":"く","ぎ":"ぐ","し":"す","ち":"つ","に":"ぬ","び":"ぶ","み":"む","り":"る"};
+  const aToU = {"わ":"う","か":"く","が":"ぐ","さ":"す","た":"つ","な":"ぬ","ば":"ぶ","ま":"む","ら":"る"};
+  const godanFromI = (stem)=>{ const last = stem[stem.length-1]; return iToU[last]? stem.slice(0,-1)+iToU[last] : null; };
+  const godanFromA = (stem)=>{ const last = stem[stem.length-1]; return aToU[last]? stem.slice(0,-1)+aToU[last] : null; };
+
+  // Bảng quy tắc: mỗi mục = [hậu tố, hàm tạo danh sách ứng viên từ gốc (stem)]
+  // Áp dụng nguyên tắc "hậu tố dài nhất khớp thì thắng" để tránh các hậu tố ngắn
+  // (như した/です) khớp chồng nhầm lên hậu tố dài hơn chứa nó (như ました/でした).
+  const RULES = [
+    ["しています", stem=>[stem+"する"]],
+    ["していました", stem=>[stem+"する"]],
+    ["している", stem=>[stem+"する"]],
+    ["していた", stem=>[stem+"する"]],
+    ["っています", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["っていました", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["っている", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["っていた", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["いています", stem=>[stem+"く"]],
+    ["いていました", stem=>[stem+"く"]],
+    ["いている", stem=>[stem+"く"]],
+    ["いていた", stem=>[stem+"く"]],
+    ["いでいます", stem=>[stem+"ぐ"]],
+    ["いでいました", stem=>[stem+"ぐ"]],
+    ["いでいる", stem=>[stem+"ぐ"]],
+    ["いでいた", stem=>[stem+"ぐ"]],
+    ["きています", stem=>[stem+"くる"]],
+    ["きていました", stem=>[stem+"くる"]],
+    ["きている", stem=>[stem+"くる"]],
+    ["きていた", stem=>[stem+"くる"]],
+    ["んでいます", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["んでいました", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["んでいる", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["んでいた", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["ませんでした", stem=>[stem+"る", stem+"する", godanFromI(stem)].filter(Boolean)],
+    ["ましょう", stem=>[stem+"る", stem+"する", godanFromI(stem)].filter(Boolean)],
+    ["ました", stem=>[stem+"る", stem+"する", godanFromI(stem)].filter(Boolean)],
+    ["ません", stem=>[stem+"る", stem+"する", godanFromI(stem)].filter(Boolean)],
+    ["ます", stem=>[stem+"る", stem+"する", godanFromI(stem)].filter(Boolean)],
+    ["なかった", stem=>[stem+"る", godanFromA(stem)].filter(Boolean)],
+    ["なければ", stem=>[stem+"る", godanFromA(stem)].filter(Boolean)],
+    ["ない", stem=>[stem+"る", godanFromA(stem)].filter(Boolean)],
+    ["たかった", stem=>[stem+"る", godanFromI(stem)].filter(Boolean)],
+    ["たくなかった", stem=>[stem+"る", godanFromI(stem)].filter(Boolean)],
+    ["たくない", stem=>[stem+"る", godanFromI(stem)].filter(Boolean)],
+    ["たい", stem=>[stem+"る", godanFromI(stem)].filter(Boolean)],
+    ["って", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["った", stem=>["う","つ","る"].map(e=>stem+e)],
+    ["いて", stem=>[stem+"く"]],
+    ["いた", stem=>[stem+"く"]],
+    ["いで", stem=>[stem+"ぐ"]],
+    ["いだ", stem=>[stem+"ぐ"]],
+    ["きて", stem=>[stem+"くる"]],
+    ["きた", stem=>[stem+"くる"]],
+    ["んで", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["んだ", stem=>["む","ぬ","ぶ"].map(e=>stem+e)],
+    ["して", stem=>stem? [stem+"する", stem+"す"] : [stem+"する"]],
+    ["した", stem=>stem? [stem+"する", stem+"す"] : [stem+"する"]],
+    ["かった", stem=>[stem+"い"]],
+    ["くなかった", stem=>[stem+"い"]],
+    ["くない", stem=>[stem+"い"]],
+    ["ければ", stem=>[stem+"い"]],
+    ["すぎる", stem=>[stem+"い", stem+"る"]],
+    ["くて", stem=>[stem+"い"]],
+    ["でした", stem=>[stem]],
+    ["じゃない", stem=>[stem]],
+    ["だった", stem=>[stem]],
+    ["です", stem=>[stem]],
+  ];
+
+  // tìm hậu tố khớp DÀI NHẤT, chỉ dùng các quy tắc có cùng độ dài lớn nhất đó
+  let bestLen = 0, matches = [];
+  for(const [suffix, fn] of RULES){
+    if(word.endsWith(suffix)){
+      if(suffix.length > bestLen){ bestLen = suffix.length; matches = [[suffix, fn]]; }
+      else if(suffix.length === bestLen){ matches.push([suffix, fn]); }
+    }
+  }
+  const cands = new Set([word]);
+  for(const [suffix, fn] of matches){
+    const stem = word.slice(0, word.length - suffix.length);
+    fn(stem).forEach(c=>{ if(c) cands.add(c); });
+  }
+  return [...cands];
+}
+
+let _vocabIndexCache = null, _vocabIndexKey = null;
+function getVocabIndex(){
+  const key = state.customVocab.length; // đơn giản: invalidate khi số từ tự thêm thay đổi
+  if(_vocabIndexCache && _vocabIndexKey===key) return _vocabIndexCache;
+  const idx = new Map();
+  allVocab().forEach(v=>{
+    if(v.kanji) { if(!idx.has(v.kanji)) idx.set(v.kanji, v); }
+    if(v.hira) { if(!idx.has(v.hira)) idx.set(v.hira, v); }
+  });
+  _vocabIndexCache = idx; _vocabIndexKey = key;
+  return idx;
+}
+
 function translateJPtoVI(text){
-  // greedy longest-match against VOCAB kanji/hira
-  const dict = [...allVocab()].sort((a,b)=>(b.kanji.length)-(a.kanji.length));
-  let parts = []; let i = 0;
+  const idx = getVocabIndex();
   const chars = Array.from(text);
-  while(i < chars.length){
-    let matched = null;
-    for(const v of dict){
-      const forms = [v.kanji, v.hira].filter(Boolean);
-      for(const f of forms){
-        if(f && text.startsWith(f, i)){ if(!matched || f.length>matched.form.length) matched = {form:f, v}; }
+  let parts = []; let i = 0;
+  const MAXLEN = 12;
+  const isUsable = (entry, len) => entry && !(len===1 && (!entry.vi || entry.vi.length===0));
+  // Kiểm tra tại vị trí i xem có khớp được không (khớp trực tiếp HOẶC qua giải chia),
+  // dùng chung cho cả bước tìm từ chính và bước "bỏ qua ký tự chưa nhận diện" —
+  // để tránh bỏ lỡ các từ chia thể khi tìm điểm dừng.
+  function matchAt(pos){
+    for(let len = Math.min(MAXLEN, chars.length-pos); len>=1; len--){
+      const chunk = chars.slice(pos, pos+len).join("");
+      if(idx.has(chunk) && isUsable(idx.get(chunk), len)) return {len, entry: idx.get(chunk)};
+      if(len>=2){
+        const cands = deinflectCandidates(chunk);
+        for(const c of cands){
+          if(c!==chunk && idx.has(c) && isUsable(idx.get(c), len)) return {len, entry: idx.get(c)};
+        }
       }
     }
-    if(matched){ parts.push({text:matched.form, vi:matched.v.vi[0], found:true}); i += matched.form.length; }
-    else {
-      // gom các ký tự chưa nhận diện được (trợ từ, chữ chưa có trong từ điển) thành 1 cụm
+    return null;
+  }
+  while(i < chars.length){
+    const m = matchAt(i);
+    if(m){
+      parts.push({text: chars.slice(i,i+m.len).join(""), entry: m.entry, found:true});
+      i += m.len;
+    } else {
       let start = i; i++;
-      while(i < chars.length){
-        let peekMatched = false;
-        for(const v of dict){
-          const forms = [v.kanji, v.hira].filter(Boolean);
-          if(forms.some(f=>f && text.startsWith(f, i))){ peekMatched = true; break; }
-        }
-        if(peekMatched) break;
-        i++;
-      }
-      const chunk = text.slice(start, i);
-      if(chunk.trim()) parts.push({text:chunk, vi:null, found:false});
+      while(i < chars.length && !matchAt(i)) i++;
+      const chunk = chars.slice(start, i).join("");
+      if(chunk.trim()) parts.push({text: chunk, entry:null, found:false});
     }
   }
   return parts;
@@ -322,10 +442,16 @@ function translateVItoJP(text){
   const words = text.toLowerCase().split(/[\s,.!?;]+/).filter(Boolean);
   let parts = [];
   words.forEach(w=>{
-    const hit = allVocab().find(v=>v.vi.some(m=>m.toLowerCase()===w) || v.vi.some(m=>m.toLowerCase().includes(w)));
-    parts.push({text:w, vi: hit? (hit.kanji||hit.hira): null, found: !!hit});
+    const hit = allVocab().find(v=>v.vi && (v.vi.some(m=>m.toLowerCase()===w) || v.vi.some(m=>m.toLowerCase().includes(w))));
+    parts.push({text:w, entry: hit||null, found: !!hit});
   });
   return parts;
+}
+function findGrammarInSentence(text){
+  return allGrammar().filter(g=>{
+    const core = g.pattern.replace(/〜/g, "").trim();
+    return core.length>=1 && text.includes(core);
+  });
 }
 
 /* ============ VOCAB LEARNING ============ */
@@ -339,15 +465,22 @@ function renderVocabTopics(){
     renderVocabList();
   }));
 }
-function renderVocabList(){
+let vocabPageSize = 60, vocabShown = 60;
+function renderVocabList(reset=true){
+  if(reset) vocabShown = vocabPageSize;
   let list = allVocab().filter(v=>{
     if(vocabLevelFilter!=="all" && v.level!==vocabLevelFilter) return false;
     if(vocabTopicFilter!=="all" && v.topic!==vocabTopicFilter) return false;
     return true;
   });
   const box = $("#vocabResults");
-  box.innerHTML = list.length? list.map(wordCardHTML).join("") : `<div class="empty"><span class="big-ico">🗂</span>Không có từ nào trong bộ lọc này.</div>`;
+  if(!list.length){ box.innerHTML = `<div class="empty"><span class="big-ico">🗂</span>Không có từ nào trong bộ lọc này.</div>`; return; }
+  const shown = list.slice(0, vocabShown);
+  const more = list.length - shown.length;
+  box.innerHTML = shown.map(wordCardHTML).join("") +
+    (more>0? `<div style="text-align:center;padding:.8rem;"><button class="btn" id="vocabLoadMore">Tải thêm (còn ${more}/${list.length})</button></div>` : `<div class="muted" style="text-align:center;">Đã hiện tất cả ${list.length} từ.</div>`);
   bindWordCardActions(box);
+  $("#vocabLoadMore")?.addEventListener("click",()=>{ vocabShown += vocabPageSize; renderVocabList(false); });
 }
 
 /* ============ FLASHCARD ============ */
@@ -421,8 +554,8 @@ function buildQuiz(level, type){
       qs.push({q:`「${v.kanji||v.hira}」(${v.hira}) nghĩa là gì?`, opts, answer:v.vi[0]});
     });
   } else if(type==="kanji"){
-    pool = KANJI_CLEAN.filter(k=>k.level===level);
-    if(pool.length<4) pool = KANJI_CLEAN;
+    pool = allKanji().filter(k=>k.level===level);
+    if(pool.length<4) pool = allKanji();
     shuffle(pool).slice(0,10).forEach(k=>{
       const wrongs = shuffle(pool.filter(x=>x!==k)).slice(0,3).map(x=>x.meaning);
       const opts = shuffle([k.meaning, ...wrongs]);
@@ -671,6 +804,361 @@ function setupMyGrammar(){
   }));
 }
 
+/* ============ TOOLS (Công cụ) ============ */
+const TOOLS_FIELDS = [
+  {key:"kanji", label:"Kanji/chữ viết"},
+  {key:"hira", label:"Hiragana"},
+  {key:"romaji", label:"Romaji"},
+  {key:"vi", label:"Nghĩa VI (cách nhau bởi ;)"},
+  {key:"level", label:"Cấp độ/Nguồn"},
+  {key:"pos", label:"Loại từ"},
+];
+const TOOLS_FIELDS_KANJI = [
+  {key:"char", label:"Kanji"},
+  {key:"meaning", label:"Nghĩa"},
+  {key:"onyomi", label:"On'yomi (cách nhau ,)"},
+  {key:"kunyomi", label:"Kun'yomi (cách nhau ,)"},
+  {key:"level", label:"Cấp độ"},
+];
+let csvParsed = null; // {headers, rows}
+let toolsEditType = "vocab";
+
+function parseCSV(text){
+  // Basic CSV parser supporting quoted fields and commas within quotes
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i], next = text[i+1];
+    if(inQuotes){
+      if(c === '"' && next === '"'){ field += '"'; i++; }
+      else if(c === '"'){ inQuotes = false; }
+      else field += c;
+    } else {
+      if(c === '"'){ inQuotes = true; }
+      else if(c === ','){ row.push(field); field=""; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=""; }
+      else if(c === '\r'){ /* skip */ }
+      else field += c;
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  const filtered = rows.filter(r=>r.some(c=>c && c.trim()));
+  return { headers: filtered[0]||[], rows: filtered.slice(1) };
+}
+
+function setupCSVImport(){
+  const zone = $("#csvDropZone"), input = $("#csvFileInput");
+  zone.addEventListener("click",()=>input.click());
+  zone.addEventListener("dragover",(e)=>{ e.preventDefault(); zone.style.borderColor="var(--indigo)"; });
+  zone.addEventListener("dragleave",()=>{ zone.style.borderColor="var(--line)"; });
+  zone.addEventListener("drop",(e)=>{
+    e.preventDefault(); zone.style.borderColor="var(--line)";
+    const file = e.dataTransfer.files[0];
+    if(file) handleCSVFile(file);
+  });
+  input.addEventListener("change",()=>{ if(input.files[0]) handleCSVFile(input.files[0]); });
+
+  $("#csvTargetType").addEventListener("change", renderCSVMapRow);
+  $("#csvPreviewBtn").addEventListener("click", renderCSVPreview);
+  $("#csvImportBtn").addEventListener("click", doCSVImport);
+}
+function handleCSVFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    csvParsed = parseCSV(reader.result);
+    if(!csvParsed.headers.length){ toast("Không đọc được file CSV."); return; }
+    $("#csvMapCard").classList.remove("hidden");
+    $("#csvPreviewCard").classList.add("hidden");
+    renderCSVMapRow();
+    toast(`Đã đọc ${csvParsed.rows.length} dòng từ file.`);
+  };
+  reader.readAsText(file, "UTF-8");
+}
+function renderCSVMapRow(){
+  if(!csvParsed) return;
+  const targetType = $("#csvTargetType").value;
+  const fields = targetType==="vocab"? TOOLS_FIELDS : TOOLS_FIELDS_KANJI;
+  const headers = csvParsed.headers;
+  $("#csvMapRow").innerHTML = fields.map(f=>{
+    // auto-guess matching column by name similarity
+    let guessIdx = headers.findIndex(h=>h.toLowerCase().includes(f.key.toLowerCase()) || (f.key==="hira" && h.toLowerCase().includes("reading")) || (f.key==="char" && h.toLowerCase().includes("kanji")));
+    return `<div>
+      <label style="font-size:.8rem;" class="muted">${f.label}</label>
+      <select data-field="${f.key}" style="width:100%;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--card);">
+        <option value="">— Không dùng —</option>
+        ${headers.map((h,i)=>`<option value="${i}" ${i===guessIdx?'selected':''}>${escapeHtml(h)}</option>`).join("")}
+      </select>
+    </div>`;
+  }).join("");
+}
+function renderCSVPreview(){
+  if(!csvParsed) return;
+  const targetType = $("#csvTargetType").value;
+  const mapping = {};
+  $$("#csvMapRow select").forEach(sel=>{ if(sel.value!=="") mapping[sel.dataset.field] = parseInt(sel.value); });
+  if(mapping.kanji===undefined && mapping.char===undefined){ toast("Cần chọn ít nhất cột Kanji."); return; }
+
+  const preview = csvParsed.rows.slice(0,10).map(row=>buildEntryFromRow(row, mapping, targetType));
+  const fields = targetType==="vocab"? TOOLS_FIELDS : TOOLS_FIELDS_KANJI;
+  const table = $("#csvPreviewTable");
+  table.innerHTML = "<tr>"+fields.map(f=>`<th style="text-align:left;padding:.3rem;border-bottom:1px solid var(--line);">${f.label}</th>`).join("")+"</tr>"+
+    preview.map(e=>"<tr>"+fields.map(f=>{
+      let v = e[f.key==="char"?"char":f.key];
+      if(Array.isArray(v)) v = v.join(", ");
+      return `<td style="padding:.3rem;border-bottom:1px solid var(--line);">${escapeHtml(String(v||""))}</td>`;
+    }).join("")+"</tr>").join("");
+  $("#csvPreviewCard").classList.remove("hidden");
+  $("#csvPreviewSummary").textContent = `Tổng cộng ${csvParsed.rows.length} dòng sẽ được nhập vào ${targetType==="vocab"?"Từ vựng":"Kanji"}.`;
+  csvParsed._mapping = mapping;
+  csvParsed._targetType = targetType;
+}
+function buildEntryFromRow(row, mapping, targetType){
+  const get = (k)=> mapping[k]!==undefined? (row[mapping[k]]||"").trim() : "";
+  if(targetType==="vocab"){
+    return {
+      kanji: get("kanji"), hira: get("hira"), kata:"", romaji: get("romaji"),
+      pos: get("pos"), level: get("level")||"Nhập CSV", topic:"Nhập từ CSV",
+      vi: get("vi")? get("vi").split(";").map(s=>s.trim()).filter(Boolean) : [],
+      en:[], jp:"", examples:[], synonyms:[], compounds:[], imported:true
+    };
+  } else {
+    return {
+      char: get("char"), meaning: get("meaning"),
+      onyomi: get("onyomi")? get("onyomi").split(",").map(s=>s.trim()).filter(Boolean):[],
+      kunyomi: get("kunyomi")? get("kunyomi").split(",").map(s=>s.trim()).filter(Boolean):[],
+      level: get("level")||"Nhập CSV", strokes:0, radical:"", compounds:[], imported:true
+    };
+  }
+}
+function doCSVImport(){
+  if(!csvParsed || !csvParsed._mapping) return;
+  const { _mapping: mapping, _targetType: targetType, rows } = csvParsed;
+  let count = 0;
+  rows.forEach(row=>{
+    const entry = buildEntryFromRow(row, mapping, targetType);
+    if(targetType==="vocab"){
+      if(!entry.kanji && !entry.hira) return;
+      addCustomVocab(entry); count++;
+    } else {
+      if(!entry.char) return;
+      addCustomKanji(entry); count++;
+    }
+  });
+  $("#csvImportResult").textContent = `✅ Đã thêm ${count} mục vào ${targetType==="vocab"?"Từ vựng":"Kanji"}. Bạn có thể vào "Sửa trực tiếp" để bổ sung thêm chi tiết.`;
+  toast(`Đã nhập ${count} mục thành công!`);
+}
+
+/* -- custom kanji management (mirrors custom vocab) -- */
+function addCustomKanji(k){
+  const key = k.char;
+  state.customKanji = state.customKanji.filter(x=>x.char!==key);
+  state.customKanji.push(k);
+  scheduleSave();
+}
+
+/* -- Edit table -- */
+let editShown = 40;
+function renderEditTable(){
+  const q = normalize($("#editSearchInput").value);
+  const box = $("#editTableArea");
+  if(toolsEditType==="vocab"){
+    let list = [...state.customVocab, ...(typeof IMPORTED_VOCAB!=="undefined"?IMPORTED_VOCAB:[])];
+    if(q) list = list.filter(v=>normalize(v.kanji).includes(q)||normalize(v.hira).includes(q));
+    const shown = list.slice(0, editShown);
+    box.innerHTML = shown.map(v=>{
+      const key = vkey(v);
+      return `<div class="card" data-editkey="${escapeAttr(key)}">
+        <div class="two-col">
+          <input data-f="kanji" value="${escapeAttr(v.kanji)}" placeholder="Kanji">
+          <input data-f="hira" value="${escapeAttr(v.hira)}" placeholder="Hiragana">
+          <input data-f="romaji" value="${escapeAttr(v.romaji||"")}" placeholder="Romaji">
+          <input data-f="level" value="${escapeAttr(v.level||"")}" placeholder="Cấp độ">
+        </div>
+        <input data-f="vi" value="${escapeAttr((v.vi||[]).join('; '))}" placeholder="Nghĩa VI (cách nhau ;)" style="width:100%;margin-top:.4rem;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:var(--card);">
+        <div class="row-actions"><button class="edit-save">💾 Lưu</button><button class="edit-del">🗑 Xóa</button></div>
+      </div>`;
+    }).join("") + (list.length>shown.length? `<div style="text-align:center;"><button class="btn" id="editLoadMore">Tải thêm</button></div>`:"");
+  } else {
+    let list = [...state.customKanji, ...(typeof IMPORTED_KANJI!=="undefined"?IMPORTED_KANJI:[])];
+    if(q) list = list.filter(k=>k.char.includes(q));
+    const shown = list.slice(0, editShown);
+    box.innerHTML = shown.map(k=>{
+      return `<div class="card" data-editkey="${escapeAttr(k.char)}">
+        <div class="two-col">
+          <input data-f="char" value="${escapeAttr(k.char)}" placeholder="Kanji">
+          <input data-f="meaning" value="${escapeAttr(k.meaning||"")}" placeholder="Nghĩa">
+          <input data-f="onyomi" value="${escapeAttr((k.onyomi||[]).join(', '))}" placeholder="On'yomi">
+          <input data-f="kunyomi" value="${escapeAttr((k.kunyomi||[]).join(', '))}" placeholder="Kun'yomi">
+        </div>
+        <div class="row-actions"><button class="edit-save">💾 Lưu</button><button class="edit-del">🗑 Xóa</button></div>
+      </div>`;
+    }).join("") + (list.length>shown.length? `<div style="text-align:center;"><button class="btn" id="editLoadMore">Tải thêm</button></div>`:"");
+  }
+  $$("[data-editkey]", box).forEach(card=>{
+    const origKey = card.dataset.editkey;
+    $(".edit-save",card)?.addEventListener("click",()=>{
+      if(toolsEditType==="vocab"){
+        const entry = {
+          kanji: $('[data-f=kanji]',card).value.trim(), hira: $('[data-f=hira]',card).value.trim(),
+          kata:"", romaji: $('[data-f=romaji]',card).value.trim(), pos:"",
+          level: $('[data-f=level]',card).value.trim()||"Nhập CSV", topic:"Nhập từ CSV",
+          vi: $('[data-f=vi]',card).value.split(";").map(s=>s.trim()).filter(Boolean),
+          en:[], jp:"", examples:[], synonyms:[], compounds:[], imported:true
+        };
+        // remove any old entry with the original key first (in case kanji/hira changed)
+        state.customVocab = state.customVocab.filter(x=>vkey(x)!==origKey);
+        addCustomVocab(entry);
+      } else {
+        const entry = {
+          char: $('[data-f=char]',card).value.trim(), meaning: $('[data-f=meaning]',card).value.trim(),
+          onyomi: $('[data-f=onyomi]',card).value.split(",").map(s=>s.trim()).filter(Boolean),
+          kunyomi: $('[data-f=kunyomi]',card).value.split(",").map(s=>s.trim()).filter(Boolean),
+          level:"Nhập CSV", strokes:0, radical:"", compounds:[], imported:true
+        };
+        state.customKanji = state.customKanji.filter(x=>x.char!==origKey);
+        addCustomKanji(entry);
+      }
+      toast("Đã lưu thay đổi!");
+      renderEditTable();
+    });
+    $(".edit-del",card)?.addEventListener("click",()=>{
+      if(!confirm("Xóa mục này?")) return;
+      if(toolsEditType==="vocab") state.customVocab = state.customVocab.filter(x=>vkey(x)!==origKey);
+      else state.customKanji = state.customKanji.filter(x=>x.char!==origKey);
+      scheduleSave();
+      renderEditTable();
+    });
+  });
+  $("#editLoadMore")?.addEventListener("click",()=>{ editShown += 40; renderEditTable(); });
+}
+
+/* -- Duplicate finder -- */
+function scanDuplicates(){
+  const box = $("#dupResultArea");
+  const vmap = {};
+  allVocab().forEach(v=>{ const k=vkey(v); (vmap[k]=vmap[k]||[]).push(v); });
+  const vdups = Object.entries(vmap).filter(([k,arr])=>arr.length>1);
+  const kmap = {};
+  allKanji().forEach(k=>{ (kmap[k.char]=kmap[k.char]||[]).push(k); });
+  const kdups = Object.entries(kmap).filter(([k,arr])=>arr.length>1);
+
+  if(!vdups.length && !kdups.length){ box.innerHTML = `<div class="empty"><span class="big-ico">✅</span>Không tìm thấy từ/kanji trùng lặp.</div>`; return; }
+  let html = "";
+  if(vdups.length) html += `<div class="card"><b>Từ vựng trùng (${vdups.length}):</b>` +
+    vdups.slice(0,100).map(([k,arr])=>`<div class="example">${arr[0].kanji||arr[0].hira} (${arr[0].hira}) — xuất hiện ${arr.length} lần</div>`).join("") + `</div>`;
+  if(kdups.length) html += `<div class="card"><b>Kanji trùng (${kdups.length}):</b>` +
+    kdups.slice(0,100).map(([k,arr])=>`<div class="example">${k} — xuất hiện ${arr.length} lần</div>`).join("") + `</div>`;
+  box.innerHTML = html;
+}
+
+/* -- Error checker -- */
+function scanErrors(){
+  const box = $("#errResultArea");
+  const noMeaningVocab = allVocab().filter(v=>!v.vi || v.vi.length===0);
+  const noMeaningKanji = allKanji().filter(k=>!k.meaning);
+  const noReadingVocab = allVocab().filter(v=>!v.hira);
+  let html = `<div class="card">
+    <div>📖 Từ vựng thiếu nghĩa: <b>${noMeaningVocab.length}</b></div>
+    <div>📖 Từ vựng thiếu cách đọc: <b>${noReadingVocab.length}</b></div>
+    <div>漢 Kanji thiếu nghĩa: <b>${noMeaningKanji.length}</b></div>
+  </div>`;
+  if(noMeaningVocab.length){
+    html += `<div class="card"><b>Ví dụ từ thiếu nghĩa (20 đầu):</b>` +
+      noMeaningVocab.slice(0,20).map(v=>`<span class="pill" style="margin:.15rem;">${v.kanji||v.hira}</span>`).join("") +
+      `<p class="muted" style="font-size:.8rem;margin-top:.4rem;">Vào "Sửa trực tiếp" để bổ sung nghĩa cho các từ này.</p></div>`;
+  }
+  box.innerHTML = html;
+}
+
+/* -- Export data.js -- */
+function exportDataJs(){
+  const lines = [];
+  lines.push("// NionVN — dữ liệu tự thêm/nhập, xuất ngày " + new Date().toLocaleString("vi-VN"));
+  lines.push("const CUSTOM_VOCAB_EXPORT = " + JSON.stringify(state.customVocab, null, 1) + ";");
+  lines.push("const CUSTOM_GRAMMAR_EXPORT = " + JSON.stringify(state.customGrammar, null, 1) + ";");
+  lines.push("const CUSTOM_KANJI_EXPORT = " + JSON.stringify(state.customKanji, null, 1) + ";");
+  const blob = new Blob([lines.join("\n\n")], {type:"application/javascript"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download="data-custom.js"; a.click();
+  URL.revokeObjectURL(url);
+  toast("Đã xuất data-custom.js");
+}
+
+/* -- GitHub sync (Contents API, client-side only, uses user's own PAT) -- */
+async function githubSync(){
+  const owner = $("#ghOwner").value.trim();
+  const repo = $("#ghRepo").value.trim();
+  const path = $("#ghPath").value.trim() || "data-custom.js";
+  const token = $("#ghToken").value.trim();
+  const resultEl = $("#ghSyncResult");
+  if(!owner || !repo || !token){ resultEl.textContent = "Vui lòng nhập đủ tên tài khoản, repo và token."; return; }
+
+  const content = [
+    "// NionVN — đồng bộ từ trình duyệt, " + new Date().toLocaleString("vi-VN"),
+    "const CUSTOM_VOCAB_EXPORT = " + JSON.stringify(state.customVocab) + ";",
+    "const CUSTOM_GRAMMAR_EXPORT = " + JSON.stringify(state.customGrammar) + ";",
+    "const CUSTOM_KANJI_EXPORT = " + JSON.stringify(state.customKanji) + ";"
+  ].join("\n");
+
+  resultEl.textContent = "Đang đồng bộ...";
+  try{
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+    // Step 1: check if file exists to get its sha (needed to update)
+    let sha = undefined;
+    const getRes = await fetch(apiUrl, { headers: { "Authorization": `token ${token}` } });
+    if(getRes.status===200){ const j = await getRes.json(); sha = j.sha; }
+
+    const b64 = btoa(unescape(encodeURIComponent(content)));
+    const putRes = await fetch(apiUrl, {
+      method: "PUT",
+      headers: { "Authorization": `token ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "NionVN: đồng bộ dữ liệu tự thêm từ trình duyệt",
+        content: b64,
+        sha: sha
+      })
+    });
+    if(putRes.status===200 || putRes.status===201){
+      resultEl.textContent = `✅ Đồng bộ thành công lên ${owner}/${repo}/${path}!`;
+      toast("Đồng bộ GitHub thành công!");
+    } else {
+      const errJson = await putRes.json().catch(()=>({}));
+      resultEl.textContent = `❌ Lỗi (${putRes.status}): ${errJson.message||"không xác định"}. Kiểm tra lại tên tài khoản/repo/token.`;
+    }
+  }catch(e){
+    resultEl.textContent = "❌ Lỗi kết nối: " + e.message;
+  }
+}
+
+function renderToolsHome(){
+  // called when Tools tab opens; nothing heavy needed by default
+}
+function openEditTableFor(type, key){
+  toolsEditType = type;
+  $$("#tools-edit [data-etype]").forEach(c=>c.classList.toggle("on", c.dataset.etype===type));
+  $("#editSearchInput").value = type==="kanji"? key : key.split("|")[0];
+  renderEditTable();
+}
+window.editVocabPrompt = (key)=>{ showView("tools"); $$("#toolsSubRow .chip").forEach(c=>c.classList.toggle("on", c.dataset.tsub==="edit")); $$(".tools-pane").forEach(p=>p.classList.add("hidden")); $("#tools-edit").classList.remove("hidden"); openEditTableFor("vocab", key); };
+
+function setupTools(){
+  setupCSVImport();
+  $$("#toolsSubRow .chip").forEach(c=>c.addEventListener("click",()=>{
+    $$("#toolsSubRow .chip").forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    $$(".tools-pane").forEach(p=>p.classList.add("hidden"));
+    $("#tools-"+c.dataset.tsub).classList.remove("hidden");
+  }));
+  $$("#tools-edit [data-etype]").forEach(c=>c.addEventListener("click",()=>{
+    $$("#tools-edit [data-etype]").forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    toolsEditType = c.dataset.etype; editShown = 40; renderEditTable();
+  }));
+  $("#editSearchInput").addEventListener("input",()=>{ editShown=40; renderEditTable(); });
+  $("#dupScanBtn").addEventListener("click", scanDuplicates);
+  $("#errScanBtn").addEventListener("click", scanErrors);
+  $("#exportDataJsBtn").addEventListener("click", exportDataJs);
+  $("#ghSyncBtn").addEventListener("click", githubSync);
+}
+
 /* ============ ME / HISTORY ============ */
 let meTab = "history";
 function renderMe(){
@@ -710,7 +1198,7 @@ function applySettings(){
   scheduleSave();
 }
 function exportData(){
-  const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar};
+  const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji};
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = "nionvn-data.json"; a.click();
@@ -729,6 +1217,7 @@ function importData(file){
       state.history = data.history || [];
       state.customVocab = data.customVocab || [];
       state.customGrammar = data.customGrammar || [];
+      state.customKanji = data.customKanji || [];
       state.settings = Object.assign(state.settings, data.settings||{});
       saveToStorage();
       applySettings(); renderMe(); renderMyWordsList(); renderMyGrammarList(); toast("Đã nhập dữ liệu thành công.");
@@ -742,9 +1231,19 @@ function showView(name){
   state.view = name;
   $$(".view").forEach(v=>v.classList.remove("active"));
   $("#view-"+name).classList.add("active");
-  $$("#tabs button").forEach(b=>b.classList.toggle("active", b.dataset.view===name));
+  $$(".navbtn").forEach(b=>b.classList.toggle("active", b.dataset.view===name));
   if(name==="me") renderMe();
-  if(name==="reading" && !$("#readingArea").innerHTML) { renderReadingList(); renderReadingArea(); }
+  if(name==="practice"){
+    const activeSub = $("#practiceSubRow .chip.on")?.dataset.sub || "flashcard";
+    showPracticeSub(activeSub);
+  }
+  if(name==="tools") renderToolsHome();
+}
+function showPracticeSub(sub){
+  $$("#practiceSubRow .chip").forEach(c=>c.classList.toggle("on", c.dataset.sub===sub));
+  $$(".practice-pane").forEach(p=>p.classList.add("hidden"));
+  $("#practice-"+sub).classList.remove("hidden");
+  if(sub==="reading" && !$("#readingArea").innerHTML){ renderReadingList(); renderReadingArea(); }
 }
 
 /* ============ INIT ============ */
@@ -761,8 +1260,10 @@ function init(){
   renderMyWordsList();
   setupMyGrammar();
   renderMyGrammarList();
+  setupTools();
 
-  $$("#tabs button").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));
+  $$(".navbtn").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));
+  $$("#practiceSubRow .chip").forEach(c=>c.addEventListener("click",()=>showPracticeSub(c.dataset.sub)));
 
   // Dictionary
   $("#dictSearchBtn").addEventListener("click", doDictSearch);
@@ -803,13 +1304,53 @@ function init(){
     $("#translateOutputCard").style.display = "block";
     const foundCount = parts.filter(p=>p.found).length;
     if(!parts.length || foundCount===0){
-      $("#translateOutput").innerHTML = `<span class="muted">Chưa nhận diện được từ nào trong câu này — bộ từ điển offline hiện còn nhỏ (khoảng 150 từ), nên nhiều từ (đặc biệt từ chuyên ngành/ít gặp) sẽ chưa có. Hãy thử tra từng từ riêng lẻ ở tab "Từ điển".</span>`;
-    } else {
-      $("#translateOutput").innerHTML = parts.map(p=>{
-        if(p.found) return `<span style="color:var(--indigo-deep);font-weight:600;" title="${escapeAttr(p.text)}">${escapeHtml(p.vi)}</span>`;
-        return `<span class="muted" style="text-decoration:underline dotted;" title="Chưa có trong từ điển">[${escapeHtml(p.text)}]</span>`;
-      }).join(" ");
+      $("#translateOutput").innerHTML = `<span class="muted">Chưa nhận diện được từ nào trong câu này — kể cả sau khi thử giải chia động từ/tính từ. Từ này có thể chưa có trong từ điển offline. Hãy thử tra riêng ở tab "Từ điển", hoặc tự thêm ở tab "Thêm nội dung".</span>`;
+      $("#translateGlossary").innerHTML = "";
+      $("#translateGrammarHints").innerHTML = "";
+      return;
     }
+    $("#translateOutput").innerHTML = parts.map((p,idx)=>{
+      if(p.found){
+        const label = p.entry.vi && p.entry.vi.length? p.entry.vi[0] : (p.entry.meaning || "(chưa có nghĩa)");
+        return `<span class="tr-word" data-idx="${idx}" style="color:var(--indigo-deep);font-weight:600;cursor:pointer;border-bottom:1px dashed var(--indigo);" title="Bấm để xem chi tiết">${escapeHtml(p.text)}<sub style="font-size:.7em;color:var(--ink-soft);">(${escapeHtml(label)})</sub></span>`;
+      }
+      return `<span class="muted" style="text-decoration:underline dotted;" title="Chưa có trong từ điển">${escapeHtml(p.text)}</span>`;
+    }).join("");
+
+    // Từ vựng dùng trong câu (glossary) — loại trùng
+    const seen = new Set();
+    const glossaryItems = parts.filter(p=>p.found && p.entry).filter(p=>{
+      const k = vkey(p.entry); if(seen.has(k)) return false; seen.add(k); return true;
+    });
+    $("#translateGlossary").innerHTML = glossaryItems.length? `
+      <div class="section-title"><span>📚 Từ vựng trong câu (bấm để xem chi tiết)</span></div>
+      ${glossaryItems.map(p=>wordCardHTML(p.entry)).join("")}
+    ` : "";
+    bindWordCardActions($("#translateGlossary"));
+
+    // Ngữ pháp liên quan trong câu
+    const grammarHits = findGrammarInSentence(text);
+    $("#translateGrammarHints").innerHTML = grammarHits.length? `
+      <div class="section-title"><span>📝 Ngữ pháp xuất hiện trong câu</span></div>
+      ${grammarHits.map(g=>`<div class="card">
+        <div class="word-title"><span class="jp" style="font-size:1.15rem;">${g.pattern}</span><span class="pill level lvl-${levelSlug(g.level)}">${g.level}</span></div>
+        <div style="margin-top:.3rem;"><b>Ý nghĩa:</b> ${g.meaning}</div>
+        ${g.structure? `<div><b>Cấu trúc:</b> ${g.structure}</div>`:""}
+        ${g.usage? `<div><b>Cách dùng:</b> ${g.usage}</div>`:""}
+      </div>`).join("")}
+    ` : `<p class="muted" style="font-size:.82rem;">Không phát hiện mẫu ngữ pháp cụ thể nào khớp trong câu này (bộ nhận diện dựa trên so khớp mẫu, có thể bỏ sót).</p>`;
+
+    // click từng từ trong câu để nhảy xuống glossary tương ứng / mở nhanh chi tiết
+    $$(".tr-word", $("#translateOutput")).forEach(span=>{
+      span.addEventListener("click",()=>{
+        const idx = +span.dataset.idx;
+        const entry = parts[idx].entry;
+        if(!entry) return;
+        speak(entry.kanji||entry.hira, "ja-JP");
+        const card = $(`#translateGlossary [data-key="${CSS.escape(vkey(entry))}"]`);
+        if(card) card.scrollIntoView({behavior:"smooth", block:"center"});
+      });
+    });
   });
   $("#translateSpeak").addEventListener("click",()=>{
     const text = $("#translateInput").value.trim();

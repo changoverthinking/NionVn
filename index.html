@@ -61,38 +61,52 @@ button,input,select,textarea{font-family:inherit;font-size:1rem;color:inherit;}
 button{cursor:pointer;}
 a{color:var(--indigo);}
 
-/* ===== App shell ===== */
-#app{position:relative;z-index:1;max-width:960px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
-
-header.topbar{
-  display:flex;align-items:center;gap:.7rem;padding:.9rem 1rem;
-  border-bottom:1px solid var(--line);background:var(--paper-2);position:sticky;top:0;z-index:20;
-}
-.brand{display:flex;align-items:center;gap:.6rem;flex:1;min-width:0;}
 .seal{
   width:38px;height:38px;border-radius:50%;background:var(--shu);color:#fff8ef;
   display:flex;align-items:center;justify-content:center;font-family:var(--serif);
   font-size:1.15rem;flex:none;box-shadow:var(--shadow);
 }
+.icon-btn{
+  width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--card);
+  display:flex;align-items:center;justify-content:center;font-size:1rem;color:var(--ink);
+}
+.icon-btn:hover{border-color:var(--indigo);}
 .brand-text{display:flex;flex-direction:column;line-height:1.1;min-width:0;}
 .brand-text b{font-family:var(--serif);font-size:1.15rem;letter-spacing:.02em;}
 .brand-text span{font-size:.72rem;color:var(--ink-soft);}
-.topbar-actions{display:flex;gap:.4rem;flex:none;}
-.icon-btn{
-  width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--card);
-  display:flex;align-items:center;justify-content:center;font-size:1rem;
-}
-.icon-btn:hover{border-color:var(--indigo);}
 
-nav.tabs{
-  display:flex;overflow-x:auto;gap:.15rem;padding:.4rem .6rem;background:var(--paper-2);
-  border-bottom:1px solid var(--line);position:sticky;top:64px;z-index:19;scrollbar-width:thin;
+/* ===== App shell ===== */
+#app{position:relative;z-index:1;max-width:1180px;margin:0 auto;min-height:100vh;display:flex;flex-direction:row;}
+
+.sidebar{
+  width:68px;flex:none;display:flex;flex-direction:column;align-items:stretch;
+  background:var(--paper-2);border-right:1px solid var(--line);
+  height:100vh;position:sticky;top:0;overflow-y:auto;padding:.5rem 0;z-index:20;
 }
-nav.tabs button{
-  flex:none;padding:.5rem .8rem;border:none;background:transparent;border-radius:8px 8px 0 0;
-  color:var(--ink-soft);font-size:.85rem;font-weight:600;white-space:nowrap;border-bottom:2px solid transparent;
+.sidebar-brand{display:flex;flex-direction:column;align-items:center;padding:.3rem 0 .7rem;margin-bottom:.3rem;border-bottom:1px solid var(--line);}
+.sidebar-brand .seal{width:34px;height:34px;font-size:1rem;}
+.sidebar-nav{display:flex;flex-direction:column;gap:.15rem;padding:0 .35rem;}
+.sidebar button{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  width:100%;padding:.5rem .1rem;border:none;background:transparent;border-radius:10px;
+  color:var(--ink-soft);font-size:1.15rem;font-weight:600;cursor:pointer;
 }
-nav.tabs button.active{color:var(--indigo-deep);border-bottom:2px solid var(--shu);background:var(--card);}
+.sidebar button .navlabel{font-size:.56rem;font-weight:600;line-height:1;white-space:nowrap;}
+.sidebar button.active{background:var(--card);color:var(--indigo-deep);box-shadow:inset 3px 0 0 var(--shu);}
+.sidebar button:hover{color:var(--indigo-deep);}
+.sidebar-spacer{flex:1;}
+.sidebar-bottom{border-top:1px solid var(--line);padding:.4rem .35rem 0;margin-top:.3rem;}
+.sidebar-toggles{display:flex;flex-direction:column;gap:.3rem;align-items:center;padding:.4rem 0;border-top:1px solid var(--line);margin-top:.3rem;}
+.sidebar-toggles .icon-btn{width:32px;height:32px;font-size:.85rem;}
+@media (min-width:860px){
+  .sidebar{width:180px;}
+  .sidebar button{flex-direction:row;justify-content:flex-start;gap:.6rem;padding:.65rem .8rem;font-size:1.05rem;}
+  .sidebar button .navlabel{font-size:.82rem;}
+  .sidebar-brand{flex-direction:row;justify-content:flex-start;padding:.4rem .8rem .8rem;gap:.5rem;}
+  .sidebar-toggles{flex-direction:row;justify-content:center;}
+}
+
+.content-col{flex:1;min-width:0;display:flex;flex-direction:column;min-height:100vh;}
 
 main{flex:1;padding:1rem;padding-bottom:3rem;}
 .view{display:none;animation:fade .25s ease;}
@@ -183,31 +197,33 @@ footer.bottom-nav{display:none;}
 <body data-theme="light">
 <div id="app">
 
-<header class="topbar">
-  <div class="brand">
+<div class="sidebar">
+  <div class="sidebar-brand">
     <div class="seal">忍</div>
-    <div class="brand-text"><b>NionVN</b><span>Từ điển Nhật ⇄ Việt · Offline</span></div>
+    <div class="brand-text navlabel-full"><b style="font-size:1rem;">NionVN</b></div>
   </div>
-  <div class="topbar-actions">
+  <div class="sidebar-nav" id="tabs">
+    <button class="navbtn active" data-view="dict"><span>📖</span><span class="navlabel">Từ điển</span></button>
+    <button class="navbtn" data-view="kanji"><span>漢</span><span class="navlabel">Kanji</span></button>
+    <button class="navbtn" data-view="grammar"><span>📝</span><span class="navlabel">Ngữ pháp</span></button>
+    <button class="navbtn" data-view="translate"><span>🔁</span><span class="navlabel">Dịch</span></button>
+    <button class="navbtn" data-view="vocab"><span>🗂</span><span class="navlabel">Từ vựng</span></button>
+    <button class="navbtn" data-view="mywords"><span>➕</span><span class="navlabel">Thêm nội dung</span></button>
+    <button class="navbtn" data-view="practice"><span>🎓</span><span class="navlabel">Luyện tập</span></button>
+    <button class="navbtn" data-view="tools"><span>🛠</span><span class="navlabel">Công cụ</span></button>
+    <button class="navbtn" data-view="me"><span>⭐</span><span class="navlabel">Của tôi</span></button>
+  </div>
+  <div class="sidebar-spacer"></div>
+  <div class="sidebar-toggles">
     <button class="icon-btn" id="themeToggle" title="Đổi giao diện sáng/tối">🌙</button>
     <button class="icon-btn" id="langToggle" title="VI/EN">VI</button>
   </div>
-</header>
+  <div class="sidebar-bottom">
+    <button class="navbtn" data-view="settings"><span>⚙️</span><span class="navlabel">Cài đặt</span></button>
+  </div>
+</div>
 
-<nav class="tabs" id="tabs">
-  <button data-view="dict" class="active">📖 Từ điển</button>
-  <button data-view="kanji">漢 Kanji</button>
-  <button data-view="grammar">📝 Ngữ pháp</button>
-  <button data-view="translate">🔁 Dịch</button>
-  <button data-view="vocab">🗂 Từ vựng</button>
-  <button data-view="mywords">➕ Thêm nội dung</button>
-  <button data-view="flashcard">🎴 Flashcard</button>
-  <button data-view="jlpt">🎯 JLPT</button>
-  <button data-view="reading">📰 Luyện đọc</button>
-  <button data-view="me">⭐ Của tôi</button>
-  <button data-view="settings">⚙️ Cài đặt</button>
-</nav>
-
+<div class="content-col">
 <main id="main">
 
 <!-- DICTIONARY VIEW -->
@@ -276,7 +292,7 @@ footer.bottom-nav{display:none;}
       <button class="chip on" data-tdir="jv">日 → VI</button>
       <button class="chip" data-tdir="vj">VI → 日</button>
     </div>
-    <textarea class="note" id="translateInput" placeholder="Nhập câu hoặc đoạn văn cần dịch… (bản demo dịch theo từ có trong từ điển)" style="min-height:110px;"></textarea>
+    <textarea class="note" id="translateInput" placeholder="Nhập câu hoặc đoạn văn tiếng Nhật (kể cả các thể chia động từ như ~ています, ~ました, ~たい...)" style="min-height:110px;"></textarea>
     <div class="row-actions">
       <button class="btn primary" id="translateBtn">Dịch</button>
       <button id="translateSpeak">🔊 Đọc</button>
@@ -287,10 +303,12 @@ footer.bottom-nav{display:none;}
     <div id="ocrNote" class="muted" style="font-size:.8rem;margin-top:.4rem;"></div>
   </div>
   <div class="card" id="translateOutputCard" style="display:none;">
-    <b>Kết quả (ghép nghĩa theo từ):</b>
-    <p id="translateOutput" style="margin-top:.5rem;"></p>
-    <p class="muted" style="font-size:.78rem;">* Từ tô đậm = nhận diện được trong từ điển offline. Từ trong ngoặc [ ] = chưa có trong dữ liệu offline hiện tại. Đây là bản dịch ghép từ điển, không phải dịch máy AI theo ngữ cảnh.</p>
+    <b>Kết quả (bấm vào từng từ để xem chi tiết):</b>
+    <p id="translateOutput" style="margin-top:.5rem;line-height:2.4;"></p>
+    <p class="muted" style="font-size:.78rem;">* Đây là bản dịch ghép từ điển có giải chia động từ/tính từ cơ bản (không phải AI dịch máy như Google Dịch), nên với câu phức tạp/thành ngữ có thể chưa mượt. Từ có gạch chấm chưa có trong từ điển offline.</p>
   </div>
+  <div id="translateGrammarHints"></div>
+  <div id="translateGlossary"></div>
 </section>
 
 <!-- VOCAB LEARNING VIEW -->
@@ -308,48 +326,54 @@ footer.bottom-nav{display:none;}
   <div id="vocabResults" class="grid" style="grid-template-columns:1fr;"></div>
 </section>
 
-<!-- FLASHCARD VIEW -->
-<section class="view" id="view-flashcard">
-  <div class="card">
-    <b>Bộ flashcard</b>
-    <div class="row-actions" style="margin-top:.5rem;">
-      <button class="btn" data-deck="favorites">⭐ Từ yêu thích</button>
-      <button class="btn" data-deck="mylist">🗂 Danh sách của tôi</button>
-      <button class="btn" data-deck="custom">➕ Từ tôi tự thêm</button>
-      <button class="btn" data-deck="N5">N5</button>
-      <button class="btn" data-deck="N4">N4</button>
-      <button class="btn" data-deck="N3">N3</button>
-    </div>
+<!-- PRACTICE VIEW (gộp Flashcard + JLPT + Luyện đọc) -->
+<section class="view" id="view-practice">
+  <div class="chip-row" id="practiceSubRow">
+    <button class="chip on" data-sub="flashcard">🎴 Flashcard</button>
+    <button class="chip" data-sub="jlpt">🎯 Luyện JLPT</button>
+    <button class="chip" data-sub="reading">📰 Luyện đọc</button>
   </div>
-  <div id="flashcardArea"></div>
-</section>
 
-<!-- JLPT PRACTICE VIEW -->
-<section class="view" id="view-jlpt">
-  <div class="card" id="jlptSetup">
-    <b>Luyện thi JLPT</b>
-    <p class="muted" style="font-size:.85rem;">Chọn cấp độ và loại bài luyện.</p>
-    <div class="chip-row" id="jlptLevelRow">
-      <button class="chip on" data-lvl="N5">N5</button>
-      <button class="chip" data-lvl="N4">N4</button>
-      <button class="chip" data-lvl="N3">N3</button>
-      <button class="chip" data-lvl="N2">N2</button>
-      <button class="chip" data-lvl="N1">N1</button>
+  <div id="practice-flashcard" class="practice-pane">
+    <div class="card">
+      <b>Bộ flashcard</b>
+      <div class="row-actions" style="margin-top:.5rem;">
+        <button class="btn" data-deck="favorites">⭐ Từ yêu thích</button>
+        <button class="btn" data-deck="mylist">🗂 Danh sách của tôi</button>
+        <button class="btn" data-deck="custom">➕ Từ tôi tự thêm</button>
+        <button class="btn" data-deck="N5">N5</button>
+        <button class="btn" data-deck="N4">N4</button>
+        <button class="btn" data-deck="N3">N3</button>
+      </div>
     </div>
-    <div class="chip-row" id="jlptTypeRow">
-      <button class="chip on" data-type="vocab">Từ vựng</button>
-      <button class="chip" data-type="kanji">Kanji</button>
-      <button class="chip" data-type="grammar">Ngữ pháp</button>
-    </div>
-    <button class="btn accent" id="jlptStart">Bắt đầu luyện đề</button>
+    <div id="flashcardArea"></div>
   </div>
-  <div id="jlptArea"></div>
-</section>
 
-<!-- READING VIEW -->
-<section class="view" id="view-reading">
-  <div class="chip-row" id="readingList"></div>
-  <div id="readingArea"></div>
+  <div id="practice-jlpt" class="practice-pane hidden">
+    <div class="card" id="jlptSetup">
+      <b>Luyện thi JLPT</b>
+      <p class="muted" style="font-size:.85rem;">Chọn cấp độ và loại bài luyện.</p>
+      <div class="chip-row" id="jlptLevelRow">
+        <button class="chip on" data-lvl="N5">N5</button>
+        <button class="chip" data-lvl="N4">N4</button>
+        <button class="chip" data-lvl="N3">N3</button>
+        <button class="chip" data-lvl="N2">N2</button>
+        <button class="chip" data-lvl="N1">N1</button>
+      </div>
+      <div class="chip-row" id="jlptTypeRow">
+        <button class="chip on" data-type="vocab">Từ vựng</button>
+        <button class="chip" data-type="kanji">Kanji</button>
+        <button class="chip" data-type="grammar">Ngữ pháp</button>
+      </div>
+      <button class="btn accent" id="jlptStart">Bắt đầu luyện đề</button>
+    </div>
+    <div id="jlptArea"></div>
+  </div>
+
+  <div id="practice-reading" class="practice-pane hidden">
+    <div class="chip-row" id="readingList"></div>
+    <div id="readingArea"></div>
+  </div>
 </section>
 
 <!-- ME / HISTORY VIEW -->
@@ -464,13 +488,120 @@ footer.bottom-nav{display:none;}
   </div>
 </section>
 
+<!-- TOOLS VIEW (Công cụ) -->
+<section class="view" id="view-tools">
+  <div class="chip-row" id="toolsSubRow">
+    <button class="chip on" data-tsub="import">📥 Nhập CSV</button>
+    <button class="chip" data-tsub="edit">✏️ Sửa trực tiếp</button>
+    <button class="chip" data-tsub="dup">🔍 Tìm từ trùng</button>
+    <button class="chip" data-tsub="errors">⚠️ Báo lỗi dữ liệu</button>
+    <button class="chip" data-tsub="export">📤 Xuất / Đồng bộ</button>
+  </div>
+
+  <!-- IMPORT CSV PANE -->
+  <div id="tools-import" class="tools-pane">
+    <div class="card">
+      <h3>📥 Nhập CSV / Excel (.csv)</h3>
+      <p class="muted" style="font-size:.85rem;">Kéo thả file .csv vào khung bên dưới, hoặc bấm để chọn file. Hỗ trợ file xuất từ Excel/Google Sheets (lưu dạng CSV, ngăn cách bằng dấu phẩy).</p>
+      <div id="csvDropZone" style="border:2px dashed var(--line);border-radius:10px;padding:2rem 1rem;text-align:center;cursor:pointer;background:var(--paper-2);">
+        <div style="font-size:2rem;">📄</div>
+        <div>Kéo thả file .csv vào đây, hoặc <b>bấm để chọn file</b></div>
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" class="hidden">
+      </div>
+    </div>
+
+    <div class="card hidden" id="csvMapCard">
+      <h3>🔄 Chuyển đổi cột dữ liệu</h3>
+      <p class="muted" style="font-size:.85rem;">Chọn cột CSV nào tương ứng với trường nào của NionVN. Để trống nếu không có.</p>
+      <div id="csvMapRow" class="two-col"></div>
+      <div class="row-actions" style="margin-top:.6rem;">
+        <label>Thêm vào: </label>
+        <select id="csvTargetType"><option value="vocab">📖 Từ vựng</option><option value="kanji">漢 Kanji</option></select>
+        <button class="btn primary" id="csvPreviewBtn">👁 Xem trước</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="csvPreviewCard">
+      <h3>👁 Xem trước (10 dòng đầu)</h3>
+      <div style="overflow-x:auto;"><table id="csvPreviewTable" style="width:100%;border-collapse:collapse;font-size:.85rem;"></table></div>
+      <p class="muted" style="font-size:.8rem;margin-top:.4rem;" id="csvPreviewSummary"></p>
+      <div class="row-actions">
+        <button class="btn accent" id="csvImportBtn">✅ Thêm tất cả vào từ điển</button>
+      </div>
+      <div id="csvImportResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
+    </div>
+  </div>
+
+  <!-- EDIT DIRECTLY PANE -->
+  <div id="tools-edit" class="tools-pane hidden">
+    <div class="card">
+      <h3>✏️ Sửa trực tiếp trên web</h3>
+      <p class="muted" style="font-size:.85rem;">Chỉnh sửa từ đã nhập/tự thêm ngay tại đây — đặc biệt hữu ích để bổ sung nghĩa cho từ nhập từ CSV (chỉ có Kanji + cách đọc). Thay đổi tự động lưu.</p>
+      <div class="chip-row">
+        <button class="chip on" data-etype="vocab">📖 Từ vựng</button>
+        <button class="chip" data-etype="kanji">漢 Kanji</button>
+      </div>
+      <div class="search-row">
+        <input type="text" id="editSearchInput" placeholder="Tìm từ cần sửa (Kanji/Hiragana)...">
+      </div>
+    </div>
+    <div id="editTableArea"></div>
+  </div>
+
+  <!-- DUPLICATE FINDER PANE -->
+  <div id="tools-dup" class="tools-pane hidden">
+    <div class="card">
+      <h3>🔍 Tìm từ trùng lặp</h3>
+      <p class="muted" style="font-size:.85rem;">Quét toàn bộ dữ liệu (gốc + nhập CSV + tự thêm) để tìm các mục bị trùng Kanji/cách đọc.</p>
+      <button class="btn primary" id="dupScanBtn">Quét trùng lặp</button>
+    </div>
+    <div id="dupResultArea"></div>
+  </div>
+
+  <!-- DATA ERROR CHECKER PANE -->
+  <div id="tools-errors" class="tools-pane hidden">
+    <div class="card">
+      <h3>⚠️ Báo lỗi dữ liệu</h3>
+      <p class="muted" style="font-size:.85rem;">Kiểm tra các mục thiếu thông tin quan trọng (thiếu nghĩa, thiếu cách đọc...).</p>
+      <button class="btn primary" id="errScanBtn">Quét lỗi dữ liệu</button>
+    </div>
+    <div id="errResultArea"></div>
+  </div>
+
+  <!-- EXPORT / GITHUB SYNC PANE -->
+  <div id="tools-export" class="tools-pane hidden">
+    <div class="card">
+      <h3>📤 Xuất dữ liệu</h3>
+      <p class="muted" style="font-size:.85rem;">Tải toàn bộ dữ liệu bạn đã thêm/sửa (từ vựng, kanji, ngữ pháp tự thêm) dưới dạng file <code>data.js</code> để lưu trữ hoặc dùng thay thế file gốc.</p>
+      <button class="btn primary" id="exportDataJsBtn">⬇️ Xuất data.js</button>
+    </div>
+    <div class="card">
+      <h3>🔗 Đồng bộ với GitHub</h3>
+      <p class="muted" style="font-size:.85rem;">Đẩy trực tiếp dữ liệu bạn tự thêm lên repo GitHub Pages của bạn — không cần tải file rồi kéo-thả thủ công nữa. Cần một <b>Personal Access Token</b> (tạo tại GitHub → Settings → Developer settings → Personal access tokens, chọn quyền "repo"). Token chỉ lưu trên máy bạn, không gửi cho ai khác ngoài GitHub.</p>
+      <div class="two-col">
+        <input type="text" id="ghOwner" placeholder="Tên tài khoản GitHub (VD: nguyenvana)">
+        <input type="text" id="ghRepo" placeholder="Tên repo (VD: nionvn)">
+        <input type="text" id="ghPath" placeholder="Đường dẫn file (VD: data-custom.js)" value="data-custom.js">
+        <input type="password" id="ghToken" placeholder="Personal Access Token">
+      </div>
+      <div class="row-actions">
+        <button class="btn accent" id="ghSyncBtn">🔗 Đồng bộ lên GitHub</button>
+      </div>
+      <div id="ghSyncResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
+      <p class="muted" style="font-size:.78rem;margin-top:.5rem;">Lưu ý: sau khi đồng bộ, để app thật sự dùng file này, cần thêm dòng <code>&lt;script src="data-custom.js"&gt;&lt;/script&gt;</code> vào index.html trên GitHub — tôi có thể hướng dẫn cụ thể nếu bạn cần.</p>
+    </div>
+  </div>
+</section>
+
 </main>
+</div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 
 <script src="data.js"></script>
+<script src="imported-data.js"></script>
 <script src="app.js"></script>
 <script>
   if ("serviceWorker" in navigator) {
