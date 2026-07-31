@@ -12,7 +12,10 @@ const state = {
   customVocab:[],          // từ do người dùng tự thêm (từ sách của họ)
   customGrammar:[],         // mẫu ngữ pháp do người dùng tự thêm
   customKanji:[],            // kanji do người dùng tự thêm/sửa
-  settings:{theme:"light", bigfont:false, lang:"vi"},
+  customExamSets:[],          // bộ đề luyện tập do người dùng tự tạo
+  examResults:{},               // setId -> {attempts:[...], bestScore, bestTotal}
+  practiceRun:null,
+  settings:{theme:"light", bigfont:false, lang:"vi", ltUrl:"https://libretranslate.com", ltKey:"", bgImage:null, bgOpacity:88},
   dictDir:"any",
   jlpt:{level:"N5", type:"vocab", questions:[], idx:0, score:0, active:false},
   reading:{current:0},
@@ -34,7 +37,7 @@ function scheduleSave(){
 }
 function saveToStorage(){
   try{
-    const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji};
+    const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji, customExamSets:state.customExamSets, examResults:state.examResults};
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   }catch(e){ /* storage full or unavailable - silently ignore, Export/Import still works */ }
 }
@@ -51,6 +54,8 @@ function loadFromStorage(){
     state.customVocab = data.customVocab || [];
     state.customGrammar = data.customGrammar || [];
     state.customKanji = data.customKanji || [];
+    state.customExamSets = data.customExamSets || [];
+    state.examResults = data.examResults || {};
     state.settings = Object.assign(state.settings, data.settings||{});
   }catch(e){ /* corrupted data - start fresh */ }
 }
@@ -420,9 +425,14 @@ function translateJPtoVI(text){
   let parts = []; let i = 0;
   const MAXLEN = 12;
   const isUsable = (entry, len) => entry && !(len===1 && (!entry.vi || entry.vi.length===0));
-  // Kiểm tra tại vị trí i xem có khớp được không (khớp trực tiếp HOẶC qua giải chia),
-  // dùng chung cho cả bước tìm từ chính và bước "bỏ qua ký tự chưa nhận diện" —
-  // để tránh bỏ lỡ các từ chia thể khi tìm điểm dừng.
+  // ưu tiên nhận diện trợ từ dài nhất trước (ví dụ "ながら" trước "な")
+  const particleKeys = Object.keys(PARTICLE_ROLES).sort((a,b)=>b.length-a.length);
+  function matchParticle(pos){
+    for(const p of particleKeys){
+      if(chars.slice(pos, pos+p.length).join("")===p) return p;
+    }
+    return null;
+  }
   function matchAt(pos){
     for(let len = Math.min(MAXLEN, chars.length-pos); len>=1; len--){
       const chunk = chars.slice(pos, pos+len).join("");
@@ -441,12 +451,18 @@ function translateJPtoVI(text){
     if(m){
       parts.push({text: chars.slice(i,i+m.len).join(""), entry: m.entry, found:true});
       i += m.len;
-    } else {
-      let start = i; i++;
-      while(i < chars.length && !matchAt(i)) i++;
-      const chunk = chars.slice(start, i).join("");
-      if(chunk.trim()) parts.push({text: chunk, entry:null, found:false});
+      continue;
     }
+    const particle = matchParticle(i);
+    if(particle){
+      parts.push({text: particle, particle:true, role: PARTICLE_ROLES[particle], found:false});
+      i += particle.length;
+      continue;
+    }
+    let start = i; i++;
+    while(i < chars.length && !matchAt(i) && !matchParticle(i)) i++;
+    const chunk = chars.slice(start, i).join("");
+    if(chunk.trim()) parts.push({text: chunk, entry:null, found:false});
   }
   return parts;
 }
@@ -465,6 +481,19 @@ function findGrammarInSentence(text){
     return core.length>=1 && text.includes(core);
   });
 }
+
+/* Trợ từ ngữ pháp phổ biến — không có nghĩa dịch được, chỉ mang vai trò ngữ pháp.
+   Hiện chúng mờ nhạt kèm chú thích vai trò thay vì để trống/gạch chấm gây rối mắt. */
+const PARTICLE_ROLES = {
+  "でした":"đã là/thì (quá khứ)","でしょう":"chắc là","です":"là/thì",
+  "じゃない":"không phải là","だった":"đã là",
+  "は":"chủ đề","が":"chủ ngữ","を":"tân ngữ","に":"nơi/thời điểm","で":"tại/bằng",
+  "と":"và/với","も":"cũng","の":"của","から":"từ","まで":"đến","へ":"đến hướng",
+  "か":"hỏi","ね":"nhỉ","よ":"nhấn mạnh","わ":"nhấn mạnh(nữ)","な":"nhấn mạnh",
+  "けど":"nhưng","けれど":"nhưng","ので":"vì","のに":"dù vậy",
+  "ながら":"vừa...vừa","し":"và (liệt kê)","や":"và (liệt kê)","など":"vân vân",
+  "だけ":"chỉ","しか":"chỉ (phủ định)","ばかり":"toàn là","くらい":"khoảng","ぐらい":"khoảng",
+};
 
 /* ============ VOCAB LEARNING ============ */
 let vocabLevelFilter = "all", vocabTopicFilter = "all";
@@ -552,101 +581,326 @@ function nextCard(){
   paintFlashcard();
 }
 
-/* ============ JLPT QUIZ ============ */
+/* ============ PRACTICE SETS (bộ đề) — chọn bộ, luật 3 lần sai, ôn lại sau khi làm ============ */
 function shuffle(a){ a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 
-function buildQuiz(level, type){
-  let pool, qs = [];
-  if(type==="vocab"){
-    pool = allVocab().filter(v=>v.level===level);
-    if(pool.length<4) pool = allVocab();
-    shuffle(pool).slice(0,10).forEach(v=>{
-      const wrongs = shuffle(pool.filter(x=>x!==v)).slice(0,3).map(x=>x.vi[0]);
-      const opts = shuffle([v.vi[0], ...wrongs]);
-      qs.push({q:`「${v.kanji||v.hira}」(${v.hira}) nghĩa là gì?`, opts, answer:v.vi[0]});
-    });
-  } else if(type==="kanji"){
-    pool = allKanji().filter(k=>k.level===level);
-    if(pool.length<4) pool = allKanji();
-    shuffle(pool).slice(0,10).forEach(k=>{
-      const wrongs = shuffle(pool.filter(x=>x!==k)).slice(0,3).map(x=>x.meaning);
-      const opts = shuffle([k.meaning, ...wrongs]);
-      qs.push({q:`Kanji 「${k.char}」nghĩa là gì?`, opts, answer:k.meaning});
-    });
-  } else {
-    pool = allGrammar().filter(g=>g.level===level);
-    if(pool.length<4) pool = allGrammar();
-    shuffle(pool).slice(0,10).forEach(g=>{
-      const wrongs = shuffle(pool.filter(x=>x!==g)).slice(0,3).map(x=>x.meaning);
-      const opts = shuffle([g.meaning, ...wrongs]);
-      qs.push({q:`Mẫu ngữ pháp 「${g.pattern}」nghĩa là gì?`, opts, answer:g.meaning});
-    });
-  }
-  return qs;
+const SET_SIZE = 12;
+function chunkArray(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+
+function getBuiltinSets(level, category){
+  let pool;
+  if(category==="vocab") pool = allVocab().filter(v=>v.level===level && v.vi && v.vi.length);
+  else if(category==="kanji") pool = allKanji().filter(k=>k.level===level && k.meaning);
+  else if(category==="grammar") pool = allGrammar().filter(g=>g.level===level);
+  else return [];
+  return chunkArray(pool, SET_SIZE).map((chunk,i)=>({
+    id:`builtin-${category}-${level}-${i+1}`, title:`Bộ ${i+1} (${chunk.length} câu)`,
+    level, category, source:"builtin", items:chunk
+  }));
+}
+function getCustomSetsFor(level){
+  return state.customExamSets.filter(s=>s.level===level).map(s=>({...s, category:"custom", source:"custom"}));
+}
+function getReadingSets(level){
+  return READINGS.map((r,i)=>({r,i})).filter(({r})=>r.level===level).map(({r,i})=>({
+    id:`reading-${i}`, title:r.title, level:r.level, category:"reading", source:"builtin",
+    passageIdx:i, items:r.vocab.map(w=>allVocab().find(v=>v.kanji===w||v.hira===w)).filter(Boolean).slice(0,6)
+  }));
+}
+function makeQuestionsFromItems(items, category){
+  let pool;
+  if(category==="vocab"||category==="reading") pool = allVocab().filter(v=>v.vi&&v.vi.length);
+  else if(category==="kanji") pool = allKanji().filter(k=>k.meaning);
+  else pool = allGrammar();
+  return shuffle(items).map(item=>{
+    let qText, answer, relatedKey, relCat = category==="reading"? "vocab" : category;
+    if(category==="vocab"||category==="reading"){ qText = `「${item.kanji||item.hira}」(${item.hira}) nghĩa là gì?`; answer=item.vi[0]; relatedKey=vkey(item); }
+    else if(category==="kanji"){ qText = `Kanji 「${item.char}」nghĩa là gì?`; answer=item.meaning; relatedKey=item.char; }
+    else { qText = `Mẫu ngữ pháp 「${item.pattern}」nghĩa là gì?`; answer=item.meaning; relatedKey=item.pattern; }
+    const wrongs = shuffle(pool.filter(x=>x!==item)).slice(0,3).map(x=> (category==="vocab"||category==="reading")?x.vi[0]: category==="kanji"?x.meaning:x.meaning);
+    const opts = shuffle([answer, ...new Set(wrongs)]).slice(0,4);
+    return {q:qText, opts, answer, relatedKey, category:relCat};
+  });
+}
+function getSetQuestions(setObj){
+  if(setObj.source==="custom") return shuffle(setObj.questions).map(q=>({...q, opts:shuffle(q.opts)}));
+  return makeQuestionsFromItems(setObj.items, setObj.category);
+}
+function recordExamResult(setId, score, total, passed){
+  if(!state.examResults[setId]) state.examResults[setId] = {attempts:[], bestScore:0, bestTotal:total};
+  const rec = state.examResults[setId];
+  rec.attempts.push({date:Date.now(), score, total, passed});
+  rec.attempts = rec.attempts.slice(-30);
+  rec.bestTotal = total;
+  if(passed && score > rec.bestScore) rec.bestScore = score;
+  scheduleSave();
 }
 
-function startJLPT(){
-  const level = $("#jlptLevelRow .chip.on").dataset.lvl;
-  const type = $("#jlptTypeRow .chip.on").dataset.type;
-  state.jlpt = {level, type, questions:buildQuiz(level,type), idx:0, score:0, active:true};
-  paintJLPT();
+function startPracticeSet(setObj, targetArea){
+  const questions = getSetQuestions(setObj);
+  state.practiceRun = { setObj, questions, idx:0, score:0, wrong:0, targetArea, reviewKeys:[] };
+  paintPracticeRun();
 }
-function paintJLPT(){
-  const s = state.jlpt;
-  if(!s.active){ $("#jlptArea").innerHTML=""; return; }
-  if(s.idx >= s.questions.length){
-    $("#jlptArea").innerHTML = `<div class="card"><h3>Kết quả</h3><p>Bạn đúng ${s.score}/${s.questions.length} câu (${s.level} · ${s.type}).</p>
-      <button class="btn primary" id="jlptRetry">Luyện lại</button></div>`;
-    $("#jlptRetry").addEventListener("click", startJLPT);
+function paintPracticeRun(){
+  const r = state.practiceRun;
+  const area = $(r.targetArea);
+  if(!area) return;
+  if(r.idx >= r.questions.length){
+    recordExamResult(r.setObj.id, r.score, r.questions.length, true);
+    renderPracticeComplete(r, area);
+    if(r.targetArea==="#jlptArea") renderJlptSetList();
+    if(r.targetArea==="#readingQuizArea") renderReadingSetList();
     return;
   }
-  const q = s.questions[s.idx];
-  $("#jlptArea").innerHTML = `<div class="card">
-    <div class="muted">Câu ${s.idx+1}/${s.questions.length} · Điểm: ${s.score}</div>
+  const q = r.questions[r.idx];
+  area.innerHTML = `<div class="card">
+    <div class="muted">Câu ${r.idx+1}/${r.questions.length} · Điểm: ${r.score} · Đã sai: ${r.wrong}/3</div>
     <div class="quiz-q">${q.q}</div>
     ${q.opts.map(o=>`<button class="quiz-opt" data-opt="${escapeAttr(o)}">${o}</button>`).join("")}
   </div>`;
-  $$(".quiz-opt", $("#jlptArea")).forEach(btn=>{
+  $$(".quiz-opt", area).forEach(btn=>{
     btn.addEventListener("click",()=>{
-      $$(".quiz-opt", $("#jlptArea")).forEach(b=>b.disabled=true);
+      $$(".quiz-opt", area).forEach(b=>b.disabled=true);
       const chosen = btn.dataset.opt;
-      if(chosen===q.answer){ btn.classList.add("correct"); s.score++; }
-      else{
+      r.reviewKeys.push({key:q.relatedKey, category:q.category});
+      if(chosen===q.answer){
+        btn.classList.add("correct"); r.score++;
+        setTimeout(()=>{ r.idx++; paintPracticeRun(); }, 650);
+      } else {
         btn.classList.add("wrong");
-        $$(".quiz-opt", $("#jlptArea")).forEach(b=>{ if(b.dataset.opt===q.answer) b.classList.add("correct"); });
+        $$(".quiz-opt", area).forEach(b=>{ if(b.dataset.opt===q.answer) b.classList.add("correct"); });
+        r.wrong++;
+        setTimeout(()=>{
+          if(r.wrong>3){
+            recordExamResult(r.setObj.id, r.score, r.questions.length, false);
+            area.innerHTML = `<div class="card"><h3>😵 Sai quá 3 câu!</h3><p>Cần làm lại bộ đề này từ đầu. Điểm trước khi dừng: ${r.score}/${r.questions.length}.</p>
+              <button class="btn accent" id="practiceRestart_${r.targetArea.slice(1)}">🔁 Làm lại từ đầu</button></div>`;
+            $(`#practiceRestart_${r.targetArea.slice(1)}`).addEventListener("click",()=>startPracticeSet(r.setObj, r.targetArea));
+            if(r.targetArea==="#jlptArea") renderJlptSetList();
+            if(r.targetArea==="#readingQuizArea") renderReadingSetList();
+          } else {
+            r.idx++; paintPracticeRun();
+          }
+        }, 900);
       }
-      setTimeout(()=>{ s.idx++; paintJLPT(); }, 900);
     });
   });
 }
-
-/* ============ READING ============ */
-function renderReadingList(){
-  $("#readingList").innerHTML = READINGS.map((r,i)=>`<button class="chip ${i===state.reading.current?'on':''}" data-i="${i}">${r.level} · ${r.title}</button>`).join("");
-  $$("#readingList .chip").forEach(c=>c.addEventListener("click",()=>{ state.reading.current = +c.dataset.i; renderReadingList(); renderReadingArea(); }));
+function renderPracticeComplete(r, area){
+  const pct = Math.round(r.score/r.questions.length*100);
+  const uniqueReview = []; const seenR = new Set();
+  r.reviewKeys.forEach(rk=>{ const k=rk.category+":"+rk.key; if(!seenR.has(k)){ seenR.add(k); uniqueReview.push(rk); } });
+  const reviewHtml = uniqueReview.map(rk=>{
+    if(rk.category==="vocab"){ const v = allVocab().find(x=>vkey(x)===rk.key); return v? wordCardHTML(v):""; }
+    if(rk.category==="kanji"){ const k = allKanji().find(x=>x.char===rk.key); return k? kanjiDetailHTML(k):""; }
+    if(rk.category==="grammar"){ const g = allGrammar().find(x=>x.pattern===rk.key); return g? grammarCardHTML(g):""; }
+    return "";
+  }).join("");
+  area.innerHTML = `<div class="card">
+    <h3>🎉 Hoàn thành!</h3>
+    <p>Điểm: <b>${r.score}/${r.questions.length}</b> (${pct}%) — ${r.setObj.title}</p>
+    <div class="row-actions"><button class="btn primary" id="practiceRetry_${r.targetArea.slice(1)}">🔁 Làm lại</button></div>
+  </div>
+  ${uniqueReview.length? `<div class="section-title"><span>📖 Ôn lại từ vựng/ngữ pháp trong bộ đề này</span></div>${reviewHtml}` : ""}`;
+  bindWordCardActions(area);
+  $(`#practiceRetry_${r.targetArea.slice(1)}`).addEventListener("click",()=>startPracticeSet(r.setObj, r.targetArea));
 }
-function renderReadingArea(){
-  const r = READINGS[state.reading.current];
-  let html = r.text;
-  r.vocab.forEach(w=>{
-    html = html.split(w).join(`<span class="tapword" data-w="${w}">${w}</span>`);
+
+/* -- JLPT: danh sách bộ đề theo cấp độ + loại -- */
+let jlptLevelFilter="N5", jlptTypeFilter="vocab";
+function renderJlptSetList(){
+  const box = $("#jlptSetList"); if(!box) return;
+  const sets = jlptTypeFilter==="custom"? getCustomSetsFor(jlptLevelFilter) : getBuiltinSets(jlptLevelFilter, jlptTypeFilter);
+  if(!sets.length){
+    box.innerHTML = `<div class="empty"><span class="big-ico">🎯</span>${jlptTypeFilter==="custom"? 'Chưa có bộ đề tự tạo ở cấp độ này. Vào "➕ Thêm đề" để tạo.' : 'Không đủ dữ liệu để tạo bộ đề ở mục này.'}</div>`;
+    $("#jlptArea").innerHTML = ""; return;
+  }
+  box.innerHTML = sets.map(s=>{
+    const res = state.examResults[s.id];
+    const badge = res? `<span class="pill" style="background:#5b8a5a33;">Tốt nhất: ${res.bestScore}/${res.bestTotal}</span>` : `<span class="pill">Chưa làm</span>`;
+    return `<div class="card" data-setid="${escapeAttr(s.id)}">
+      <div class="word-title"><b>${s.title}</b>${badge}</div>
+      <div class="row-actions">
+        <button class="set-start">▶ Làm bài</button>
+        ${res? `<button class="set-reset">🗑 Reset kết quả</button>`:""}
+      </div>
+    </div>`;
+  }).join("");
+  $$("[data-setid]", box).forEach(card=>{
+    const id = card.dataset.setid;
+    const setObj = sets.find(s=>s.id===id);
+    $(".set-start",card)?.addEventListener("click",()=>startPracticeSet(setObj, "#jlptArea"));
+    $(".set-reset",card)?.addEventListener("click",()=>{ if(confirm("Xóa kết quả bộ đề này?")){ delete state.examResults[id]; scheduleSave(); renderJlptSetList(); } });
   });
+}
+
+/* ============ READING (theo bộ đề: đọc bài + câu hỏi hiểu bài) ============ */
+let readingLevelFilter = "N5";
+function renderReadingSetList(){
+  const box = $("#readingSetList"); if(!box) return;
+  const sets = getReadingSets(readingLevelFilter);
+  if(!sets.length){ box.innerHTML = `<div class="empty"><span class="big-ico">📰</span>Chưa có bài đọc ở cấp độ này.</div>`; $("#readingArea").innerHTML=""; return; }
+  box.innerHTML = sets.map(s=>{
+    const res = state.examResults[s.id];
+    const badge = res? `<span class="pill" style="background:#5b8a5a33;">Tốt nhất: ${res.bestScore}/${res.bestTotal}</span>` : `<span class="pill">Chưa làm</span>`;
+    return `<div class="card" data-readset="${s.id}">
+      <div class="word-title"><b>${s.title}</b>${badge}</div>
+      <div class="row-actions">
+        <button class="read-open">📖 Đọc bài</button>
+        ${res? `<button class="set-reset">🗑 Reset kết quả</button>`:""}
+      </div>
+    </div>`;
+  }).join("");
+  $$("[data-readset]", box).forEach(card=>{
+    const id = card.dataset.readset;
+    const setObj = sets.find(s=>s.id===id);
+    $(".read-open",card)?.addEventListener("click",()=>openReadingPassage(setObj));
+    $(".set-reset",card)?.addEventListener("click",()=>{ if(confirm("Xóa kết quả bài này?")){ delete state.examResults[id]; scheduleSave(); renderReadingSetList(); } });
+  });
+}
+function openReadingPassage(setObj){
+  const r = READINGS[setObj.passageIdx];
+  let html = r.text;
+  r.vocab.forEach(w=>{ html = html.split(w).join(`<span class="tapword" data-w="${w}">${w}</span>`); });
   $("#readingArea").innerHTML = `<div class="card">
-    <div class="word-title"><h3 style="margin:0;">${r.title}</h3><span class="pill level lvl-${r.level}">${r.level}</span></div>
+    <div class="word-title"><h3 style="margin:0;">${r.title}</h3><span class="pill level lvl-${levelSlug(r.level)}">${r.level}</span></div>
     <p class="reading-text" style="margin-top:.7rem;">${html}</p>
-    <div class="row-actions"><button id="readSpeak">🔊 Đọc toàn bài</button></div>
+    <div class="row-actions"><button id="readSpeak">🔊 Đọc toàn bài</button>${setObj.items.length? `<button class="btn accent" id="readStartQuiz">✅ Đã đọc xong, làm câu hỏi</button>`:""}</div>
     <div id="readingWordInfo"></div>
-  </div>`;
+  </div>
+  <div id="readingQuizArea"></div>`;
   $("#readSpeak").addEventListener("click",()=>speak(r.text,"ja-JP"));
+  $("#readStartQuiz")?.addEventListener("click",()=>startPracticeSet(setObj, "#readingQuizArea"));
   $$(".tapword", $("#readingArea")).forEach(sp=>sp.addEventListener("click",()=>{
     const w = sp.dataset.w;
-    const hit = allVocab().find(v=>v.kanji===w || v.hira===w) ;
+    const hit = allVocab().find(v=>v.kanji===w || v.hira===w);
     const info = $("#readingWordInfo");
     if(hit){ info.innerHTML = wordCardHTML(hit); bindWordCardActions(info); }
-    else{ info.innerHTML = `<div class="card"><b>${w}</b> — chưa có trong từ điển mẫu. <button id="rSpeak">🔊</button></div>`;
+    else{ info.innerHTML = `<div class="card"><b>${w}</b> — chưa có trong từ điển. <button id="rSpeak">🔊</button></div>`;
       $("#rSpeak").addEventListener("click",()=>speak(w,"ja-JP")); }
     logHistory("reading-word", w);
   }));
+}
+
+/* ============ THÊM ĐỀ (custom exam sets) ============ */
+let asDraft = [];
+function renderAsQList(){
+  $("#asQList").innerHTML = asDraft.length? `Đã thêm ${asDraft.length} câu:<br>` + asDraft.map((q,i)=>`${i+1}. ${escapeHtml(q.q)}`).join("<br>") : "Chưa có câu hỏi nào trong bộ đề đang soạn.";
+}
+function renderMyExamSetsList(){
+  const box = $("#myExamSetsList");
+  if(!state.customExamSets.length){ box.innerHTML = `<div class="empty"><span class="big-ico">📌</span>Chưa có bộ đề tự tạo nào.</div>`; return; }
+  box.innerHTML = state.customExamSets.slice().reverse().map(s=>`
+    <div class="card" data-esid="${s.id}">
+      <div class="word-title"><b>${s.title}</b><span class="pill level lvl-${levelSlug(s.level)}">${s.level}</span><span class="pill">${s.questions.length} câu</span></div>
+      <div class="row-actions"><button class="es-del">🗑 Xóa bộ đề</button></div>
+    </div>`).join("");
+  $$("[data-esid]", box).forEach(card=>{
+    $(".es-del",card)?.addEventListener("click",()=>{
+      if(!confirm("Xóa bộ đề này?")) return;
+      state.customExamSets = state.customExamSets.filter(s=>s.id!==card.dataset.esid);
+      scheduleSave(); renderMyExamSetsList();
+    });
+  });
+}
+function setupAddSet(){
+  $("#asAddQBtn").addEventListener("click",()=>{
+    const q = $("#asQ").value.trim(), correct = $("#asOpt1").value.trim();
+    const wrongs = [$("#asOpt2").value.trim(), $("#asOpt3").value.trim(), $("#asOpt4").value.trim()].filter(Boolean);
+    const explain = $("#asExplain").value.trim();
+    if(!q || !correct || wrongs.length<1){ toast("Cần ít nhất: câu hỏi, đáp án đúng, và 1 đáp án sai."); return; }
+    asDraft.push({q, opts:[correct,...wrongs], answer:correct, explain});
+    ["#asQ","#asOpt1","#asOpt2","#asOpt3","#asOpt4","#asExplain"].forEach(id=>$(id).value="");
+    renderAsQList();
+    toast("Đã thêm câu hỏi vào bộ đề đang soạn.");
+  });
+  $("#asBulkBtn").addEventListener("click",()=>{
+    const raw = $("#asBulk").value.trim();
+    if(!raw) return;
+    let count=0;
+    raw.split("\n").map(l=>l.trim()).filter(Boolean).forEach(line=>{
+      const parts = line.split("|").map(s=>s.trim());
+      if(parts.length<3) return;
+      const [q, correct, ...rest] = parts;
+      const explain = rest.length>3? rest.pop() : "";
+      const wrongs = rest.filter(Boolean);
+      if(!q || !correct || !wrongs.length) return;
+      asDraft.push({q, opts:[correct,...wrongs], answer:correct, explain});
+      count++;
+    });
+    $("#asBulk").value = "";
+    renderAsQList();
+    toast(`Đã thêm ${count} câu từ nhập hàng loạt.`);
+  });
+  $("#asSaveBtn").addEventListener("click",()=>{
+    const title = $("#asTitle").value.trim();
+    const level = $("#asLevel").value;
+    if(!title){ toast("Cần nhập tên bộ đề."); return; }
+    if(!asDraft.length){ toast("Bộ đề chưa có câu hỏi nào."); return; }
+    state.customExamSets.push({ id:"custom-"+Date.now(), title, level, questions: asDraft.slice() });
+    asDraft = [];
+    $("#asTitle").value = "";
+    renderAsQList();
+    scheduleSave();
+    renderMyExamSetsList();
+    $("#asSaveResult").textContent = `✅ Đã lưu bộ đề "${title}" (${level}) — vào "🎯 Luyện JLPT" > chọn cấp độ ${level} > "📌 Đề tự tạo" để làm.`;
+  });
+  $("#asClearBtn").addEventListener("click",()=>{
+    asDraft = []; renderAsQList();
+    ["#asTitle","#asQ","#asOpt1","#asOpt2","#asOpt3","#asOpt4","#asExplain","#asBulk"].forEach(id=>$(id).value="");
+  });
+}
+
+/* ============ TIẾN ĐỘ (progress dashboard) ============ */
+function renderProgressDashboard(){
+  const levels = ["N5","N4","N3","N2","N1"];
+  const categories = ["vocab","kanji","grammar"];
+  let barsHtml = "";
+  levels.forEach(level=>{
+    let totalSets=0, passedSets=0;
+    categories.forEach(cat=>{
+      const sets = getBuiltinSets(level, cat);
+      totalSets += sets.length;
+      sets.forEach(s=>{ const r = state.examResults[s.id]; if(r && r.attempts.some(a=>a.passed)) passedSets++; });
+    });
+    const pct = totalSets? Math.round(passedSets/totalSets*100) : 0;
+
+    // Đề tự tạo — tính riêng, không gộp vào % ở trên (vì số lượng đề tự tạo
+    // là mở, gộp chung sẽ làm sai lệch ý nghĩa "đã học được bao nhiêu % nội dung gốc")
+    const customSets = getCustomSetsFor(level);
+    const customTotal = customSets.length;
+    const customPassed = customSets.filter(s=>{ const r = state.examResults[s.id]; return r && r.attempts.some(a=>a.passed); }).length;
+    const customPct = customTotal? Math.round(customPassed/customTotal*100) : 0;
+
+    barsHtml += `<div class="card">
+      <div class="word-title"><b>${level}</b><span class="muted">${passedSets}/${totalSets} bộ đề gốc hoàn thành (${pct}%)</span></div>
+      <div style="background:var(--paper-2);border-radius:8px;height:14px;overflow:hidden;margin-top:.4rem;">
+        <div style="background:var(--indigo);height:100%;width:${pct}%;transition:width .4s ease;"></div>
+      </div>
+      ${customTotal? `
+      <div class="muted" style="font-size:.8rem;margin-top:.6rem;">📌 Đề tự tạo: ${customPassed}/${customTotal} hoàn thành (${customPct}%)</div>
+      <div style="background:var(--paper-2);border-radius:8px;height:10px;overflow:hidden;margin-top:.25rem;">
+        <div style="background:var(--gold);height:100%;width:${customPct}%;transition:width .4s ease;"></div>
+      </div>` : ""}
+    </div>`;
+  });
+  $("#progressBars").innerHTML = barsHtml;
+
+  let allAttempts = [];
+  Object.entries(state.examResults).forEach(([setId, r])=>{ r.attempts.forEach(a=>allAttempts.push({...a, setId})); });
+  allAttempts.sort((a,b)=>b.date-a.date);
+  const recent = allAttempts.slice(0,20);
+  $("#progressHistory").innerHTML = recent.length? recent.map(a=>{
+    const pct = Math.round(a.score/a.total*100);
+    return `<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid var(--line);">
+      <span style="font-size:.75rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${a.setId}</span>
+      <span style="font-size:.78rem;">${a.score}/${a.total}</span>
+      <div style="width:60px;background:var(--paper-2);border-radius:4px;height:8px;overflow:hidden;flex:none;">
+        <div style="background:${a.passed?'#5b8a5a':'var(--shu)'};height:100%;width:${pct}%;"></div>
+      </div>
+      <span class="muted" style="font-size:.68rem;flex:none;">${new Date(a.date).toLocaleDateString('vi-VN')}</span>
+    </div>`;
+  }).join("") : `<p class="muted">Chưa có lịch sử làm bài.</p>`;
 }
 
 /* ============ MY WORDS (custom vocab from user's own books) ============ */
@@ -1199,6 +1453,17 @@ function renderMe(){
 }
 
 /* ============ SETTINGS / EXPORT / IMPORT ============ */
+const DEFAULT_BG_LIGHT = (typeof BG_LIGHT_DEFAULT!=="undefined") ? BG_LIGHT_DEFAULT : "bg/bg-light.jpg";
+const DEFAULT_BG_DARK = (typeof BG_DARK_DEFAULT!=="undefined") ? BG_DARK_DEFAULT : "bg/bg-dark.jpg";
+function applyBackground(){
+  const custom = state.settings.bgImage;
+  const def = state.settings.theme==="dark" ? DEFAULT_BG_DARK : DEFAULT_BG_LIGHT;
+  const url = custom || def;
+  if($("#bgLayer")) $("#bgLayer").style.backgroundImage = `url("${url}")`;
+  if($("#bgOverlay")) $("#bgOverlay").style.opacity = (state.settings.bgOpacity!=null? state.settings.bgOpacity : 88)/100;
+  if($("#bgPreview")) $("#bgPreview").src = url;
+  if($("#setBgOpacity")) $("#setBgOpacity").value = state.settings.bgOpacity!=null? state.settings.bgOpacity : 88;
+}
 function applySettings(){
   document.body.setAttribute("data-theme", state.settings.theme);
   document.documentElement.style.setProperty("--fs", state.settings.bigfont? "19px":"16px");
@@ -1207,10 +1472,13 @@ function applySettings(){
   $("#setBigFont").checked = state.settings.bigfont;
   $("#setLang").value = state.settings.lang;
   $("#langToggle").textContent = state.settings.lang.toUpperCase();
+  if($("#setLtUrl")) $("#setLtUrl").value = state.settings.ltUrl || "";
+  if($("#setLtKey")) $("#setLtKey").value = state.settings.ltKey || "";
+  applyBackground();
   scheduleSave();
 }
 function exportData(){
-  const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji};
+  const payload = {favorites:state.favorites, mylist:state.mylist, notes:state.notes, fc:state.fc, history:state.history, settings:state.settings, customVocab:state.customVocab, customGrammar:state.customGrammar, customKanji:state.customKanji, customExamSets:state.customExamSets, examResults:state.examResults};
   const blob = new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = "nionvn-data.json"; a.click();
@@ -1230,6 +1498,8 @@ function importData(file){
       state.customVocab = data.customVocab || [];
       state.customGrammar = data.customGrammar || [];
       state.customKanji = data.customKanji || [];
+      state.customExamSets = data.customExamSets || [];
+      state.examResults = data.examResults || {};
       state.settings = Object.assign(state.settings, data.settings||{});
       saveToStorage();
       applySettings(); renderMe(); renderMyWordsList(); renderMyGrammarList(); toast("Đã nhập dữ liệu thành công.");
@@ -1255,7 +1525,10 @@ function showPracticeSub(sub){
   $$("#practiceSubRow .chip").forEach(c=>c.classList.toggle("on", c.dataset.sub===sub));
   $$(".practice-pane").forEach(p=>p.classList.add("hidden"));
   $("#practice-"+sub).classList.remove("hidden");
-  if(sub==="reading" && !$("#readingArea").innerHTML){ renderReadingList(); renderReadingArea(); }
+  if(sub==="jlpt") renderJlptSetList();
+  if(sub==="reading" && !$("#readingSetList").innerHTML) renderReadingSetList();
+  if(sub==="addset"){ renderAsQList(); renderMyExamSetsList(); }
+  if(sub==="progress") renderProgressDashboard();
 }
 
 /* ============ INIT ============ */
@@ -1266,8 +1539,6 @@ function init(){
   renderVocabList();
   renderKanjiList();
   renderGrammar();
-  renderReadingList();
-  renderReadingArea();
   setupMyWords();
   renderMyWordsList();
   setupMyGrammar();
@@ -1309,9 +1580,7 @@ function init(){
   $$("[data-tdir]").forEach(c=>c.addEventListener("click",()=>{
     tdir = c.dataset.tdir; $$("[data-tdir]").forEach(x=>x.classList.remove("on")); c.classList.add("on");
   }));
-  $("#translateBtn").addEventListener("click",()=>{
-    const text = $("#translateInput").value.trim();
-    if(!text) return;
+  function runOfflineTranslate(text){
     const parts = tdir==="jv"? translateJPtoVI(text) : translateVItoJP(text);
     $("#translateOutputCard").style.display = "block";
     const foundCount = parts.filter(p=>p.found).length;
@@ -1326,10 +1595,12 @@ function init(){
         const label = p.entry.vi && p.entry.vi.length? p.entry.vi[0] : (p.entry.meaning || "(chưa có nghĩa)");
         return `<span class="tr-word" data-idx="${idx}" style="color:var(--indigo-deep);font-weight:600;cursor:pointer;border-bottom:1px dashed var(--indigo);" title="Bấm để xem chi tiết">${escapeHtml(p.text)}<sub style="font-size:.7em;color:var(--ink-soft);">(${escapeHtml(label)})</sub></span>`;
       }
+      if(p.particle){
+        return `<span class="muted" style="opacity:.6;" title="Trợ từ — không dịch nghĩa riêng">${escapeHtml(p.text)}<sub style="font-size:.65em;">(${escapeHtml(p.role)})</sub></span>`;
+      }
       return `<span class="muted" style="text-decoration:underline dotted;" title="Chưa có trong từ điển">${escapeHtml(p.text)}</span>`;
     }).join("");
 
-    // Từ vựng dùng trong câu (glossary) — loại trùng
     const seen = new Set();
     const glossaryItems = parts.filter(p=>p.found && p.entry).filter(p=>{
       const k = vkey(p.entry); if(seen.has(k)) return false; seen.add(k); return true;
@@ -1340,7 +1611,6 @@ function init(){
     ` : "";
     bindWordCardActions($("#translateGlossary"));
 
-    // Ngữ pháp liên quan trong câu
     const grammarHits = findGrammarInSentence(text);
     $("#translateGrammarHints").innerHTML = grammarHits.length? `
       <div class="section-title"><span>📝 Ngữ pháp xuất hiện trong câu</span></div>
@@ -1352,7 +1622,6 @@ function init(){
       </div>`).join("")}
     ` : `<p class="muted" style="font-size:.82rem;">Không phát hiện mẫu ngữ pháp cụ thể nào khớp trong câu này (bộ nhận diện dựa trên so khớp mẫu, có thể bỏ sót).</p>`;
 
-    // click từng từ trong câu để nhảy xuống glossary tương ứng / mở nhanh chi tiết
     $$(".tr-word", $("#translateOutput")).forEach(span=>{
       span.addEventListener("click",()=>{
         const idx = +span.dataset.idx;
@@ -1363,6 +1632,59 @@ function init(){
         if(card) card.scrollIntoView({behavior:"smooth", block:"center"});
       });
     });
+  }
+  $("#translateBtn").addEventListener("click",()=>{
+    const text = $("#translateInput").value.trim();
+    if(!text) return;
+    $("#aiTranslateCard").classList.add("hidden");
+    runOfflineTranslate(text);
+  });
+
+  /* -- AI Translate (LibreTranslate, cần mạng + thường cần API key) -- */
+  async function libreTranslate(text, source, target){
+    const base = (state.settings.ltUrl || "").trim().replace(/\/+$/,"");
+    if(!base) throw new Error("Chưa cấu hình địa chỉ máy chủ LibreTranslate trong Cài đặt.");
+    const body = { q: text, source, target, format: "text" };
+    if(state.settings.ltKey) body.api_key = state.settings.ltKey;
+    const res = await fetch(base + "/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){
+      const errText = await res.text().catch(()=> "");
+      throw new Error(`Máy chủ trả lỗi ${res.status}. ${errText.slice(0,150)}`);
+    }
+    const data = await res.json();
+    if(!data.translatedText) throw new Error("Máy chủ không trả về kết quả dịch hợp lệ.");
+    return data.translatedText;
+  }
+  $("#aiTranslateBtn").addEventListener("click", async ()=>{
+    const text = $("#translateInput").value.trim();
+    if(!text) return;
+    runOfflineTranslate(text); // vẫn hiện từ vựng/ngữ pháp liên quan từ bộ offline
+    $("#aiTranslateCard").classList.remove("hidden");
+    $("#aiTranslateOutput").textContent = "";
+    $("#aiTranslateStatus").textContent = "⏳ Đang gọi máy chủ dịch AI...";
+    try{
+      const source = tdir==="jv"? "ja" : "vi";
+      const target = tdir==="jv"? "vi" : "ja";
+      const translated = await libreTranslate(text, source, target);
+      $("#aiTranslateOutput").textContent = translated;
+      $("#aiTranslateStatus").textContent = "✅ Dịch bởi LibreTranslate (" + (state.settings.ltUrl||"") + ")";
+    }catch(e){
+      $("#aiTranslateOutput").innerHTML = "";
+      $("#aiTranslateStatus").innerHTML = `❌ Không dịch được: ${escapeHtml(e.message)}<br>Kiểm tra lại mạng, địa chỉ máy chủ và API key trong Cài đặt. Bạn vẫn có thể dùng nút "Dịch (từ điển offline)" phía trên.`;
+    }
+  });
+  $("#ltTestBtn").addEventListener("click", async ()=>{
+    $("#ltTestResult").textContent = "⏳ Đang kiểm tra...";
+    try{
+      const r = await libreTranslate("こんにちは", "ja", "vi");
+      $("#ltTestResult").textContent = `✅ Kết nối OK! Kết quả thử: "${r}"`;
+    }catch(e){
+      $("#ltTestResult").textContent = "❌ " + e.message;
+    }
   });
   $("#translateSpeak").addEventListener("click",()=>{
     const text = $("#translateInput").value.trim();
@@ -1382,14 +1704,31 @@ function init(){
   // Flashcard
   $$("[data-deck]").forEach(b=>b.addEventListener("click",()=>renderFlashcardArea(b.dataset.deck)));
 
-  // JLPT
+  // JLPT (chọn cấp độ / loại -> hiện danh sách bộ đề)
   $$("#jlptLevelRow .chip").forEach(c=>c.addEventListener("click",()=>{
     $$("#jlptLevelRow .chip").forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    jlptLevelFilter = c.dataset.lvl; renderJlptSetList();
   }));
   $$("#jlptTypeRow .chip").forEach(c=>c.addEventListener("click",()=>{
     $$("#jlptTypeRow .chip").forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    jlptTypeFilter = c.dataset.type; renderJlptSetList();
   }));
-  $("#jlptStart").addEventListener("click", startJLPT);
+
+  // Reading (chọn cấp độ -> danh sách bài -> đọc + làm câu hỏi)
+  $$("#readingLevelRow .chip").forEach(c=>c.addEventListener("click",()=>{
+    $$("#readingLevelRow .chip").forEach(x=>x.classList.remove("on")); c.classList.add("on");
+    readingLevelFilter = c.dataset.lvl; renderReadingSetList();
+  }));
+
+  // Thêm đề
+  setupAddSet();
+
+  // Tiến độ
+  $("#progressResetBtn").addEventListener("click",()=>{
+    if(confirm("Xóa toàn bộ tiến độ/kết quả luyện đề? (Không ảnh hưởng từ vựng/ghi chú/flashcard)")){
+      state.examResults = {}; scheduleSave(); renderProgressDashboard(); toast("Đã reset tiến độ.");
+    }
+  });
 
   // Me tabs
   $$("[data-metab]").forEach(c=>c.addEventListener("click",()=>{
@@ -1407,6 +1746,51 @@ function init(){
   $("#setDark").addEventListener("change",e=>{ state.settings.theme = e.target.checked? "dark":"light"; applySettings(); });
   $("#setBigFont").addEventListener("change",e=>{ state.settings.bigfont = e.target.checked; applySettings(); });
   $("#setLang").addEventListener("change",e=>{ state.settings.lang = e.target.value; applySettings(); });
+  $("#setLtUrl").addEventListener("change",e=>{ state.settings.ltUrl = e.target.value.trim(); scheduleSave(); });
+  $("#setLtKey").addEventListener("change",e=>{ state.settings.ltKey = e.target.value.trim(); scheduleSave(); });
+
+  // Background image
+  $("#bgUploadInput").addEventListener("change",(e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    if(!file.type.startsWith("image/")){ $("#bgUploadStatus").textContent = "Vui lòng chọn 1 file ảnh."; return; }
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxDim = 1600;
+        let w = img.width, h = img.height;
+        if(w>maxDim || h>maxDim){
+          if(w>=h){ h = Math.round(h*maxDim/w); w = maxDim; }
+          else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        let dataUrl;
+        try{ dataUrl = canvas.toDataURL("image/jpeg", 0.78); }
+        catch(err){ $("#bgUploadStatus").textContent = "Không xử lý được ảnh này."; return; }
+        state.settings.bgImage = dataUrl;
+        applyBackground();
+        scheduleSave();
+        $("#bgUploadStatus").textContent = `Đã cập nhật ảnh nền (~${Math.round(dataUrl.length/1024)} KB, đã tự nén để không chiếm quá nhiều bộ nhớ).`;
+      };
+      img.onerror = ()=>{ $("#bgUploadStatus").textContent = "Không đọc được ảnh này."; };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  $("#bgResetBtn").addEventListener("click",()=>{
+    state.settings.bgImage = null;
+    applyBackground();
+    scheduleSave();
+    $("#bgUploadStatus").textContent = "Đã khôi phục ảnh nền mặc định (Thủy Mặc & Trúc).";
+  });
+  $("#setBgOpacity").addEventListener("input",(e)=>{
+    state.settings.bgOpacity = +e.target.value;
+    applyBackground();
+  });
+  $("#setBgOpacity").addEventListener("change",()=>scheduleSave());
   $("#exportData").addEventListener("click", exportData);
   $("#importData").addEventListener("change",e=>{ if(e.target.files[0]) importData(e.target.files[0]); });
   $("#clearData").addEventListener("click",()=>{

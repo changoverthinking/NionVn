@@ -56,6 +56,13 @@ body::before{
   content:"";position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:0;
   background-image:repeating-linear-gradient(0deg,var(--ink) 0 1px,transparent 1px 26px);
 }
+.bg-layer{
+  position:fixed;inset:0;z-index:-2;background-size:cover;background-position:center;
+  background-repeat:no-repeat;transition:opacity .4s ease;
+}
+.bg-overlay{
+  position:fixed;inset:0;z-index:-1;background:var(--paper);opacity:.88;transition:background .25s ease, opacity .3s ease;
+}
 h1,h2,h3{font-family:var(--serif);font-weight:600;margin:0 0 .4em;}
 button,input,select,textarea{font-family:inherit;font-size:1rem;color:inherit;}
 button{cursor:pointer;}
@@ -195,6 +202,8 @@ footer.bottom-nav{display:none;}
 </style>
 </head>
 <body data-theme="light">
+<div class="bg-layer" id="bgLayer"></div>
+<div class="bg-overlay" id="bgOverlay"></div>
 <div id="app">
 
 <div class="sidebar">
@@ -294,13 +303,19 @@ footer.bottom-nav{display:none;}
     </div>
     <textarea class="note" id="translateInput" placeholder="Nhập câu hoặc đoạn văn tiếng Nhật (kể cả các thể chia động từ như ~ています, ~ました, ~たい...)" style="min-height:110px;"></textarea>
     <div class="row-actions">
-      <button class="btn primary" id="translateBtn">Dịch</button>
+      <button class="btn primary" id="translateBtn">📖 Dịch (từ điển offline)</button>
+      <button class="btn accent" id="aiTranslateBtn">🤖 Dịch AI (cần mạng)</button>
       <button id="translateSpeak">🔊 Đọc</button>
       <label class="btn" style="cursor:pointer;">📷 Dịch từ ảnh (OCR)
         <input type="file" id="ocrInput" accept="image/*" class="hidden">
       </label>
     </div>
     <div id="ocrNote" class="muted" style="font-size:.8rem;margin-top:.4rem;"></div>
+  </div>
+  <div class="card hidden" id="aiTranslateCard">
+    <b>🤖 Kết quả dịch AI (LibreTranslate)</b>
+    <p id="aiTranslateOutput" style="margin-top:.5rem;font-family:var(--serif);font-size:1.05rem;"></p>
+    <p class="muted" id="aiTranslateStatus" style="font-size:.8rem;"></p>
   </div>
   <div class="card" id="translateOutputCard" style="display:none;">
     <b>Kết quả (bấm vào từng từ để xem chi tiết):</b>
@@ -332,6 +347,8 @@ footer.bottom-nav{display:none;}
     <button class="chip on" data-sub="flashcard">🎴 Flashcard</button>
     <button class="chip" data-sub="jlpt">🎯 Luyện JLPT</button>
     <button class="chip" data-sub="reading">📰 Luyện đọc</button>
+    <button class="chip" data-sub="addset">➕ Thêm đề</button>
+    <button class="chip" data-sub="progress">📊 Tiến độ</button>
   </div>
 
   <div id="practice-flashcard" class="practice-pane">
@@ -349,10 +366,12 @@ footer.bottom-nav{display:none;}
     <div id="flashcardArea"></div>
   </div>
 
+  <!-- JLPT: chọn cấp độ -> chọn loại -> chọn bộ đề -> làm bài -->
   <div id="practice-jlpt" class="practice-pane hidden">
     <div class="card" id="jlptSetup">
-      <b>Luyện thi JLPT</b>
-      <p class="muted" style="font-size:.85rem;">Chọn cấp độ và loại bài luyện.</p>
+      <b>🎯 Luyện thi JLPT</b>
+      <p class="muted" style="font-size:.85rem;">Chọn cấp độ và loại, sau đó chọn bộ đề cụ thể để làm.
+        <br><b>Luật tính điểm:</b> trả lời đúng được cộng điểm và sang câu tiếp theo; trả lời sai không được điểm nhưng vẫn sang câu tiếp — <b>nếu sai quá 3 câu trong 1 lượt làm, phải làm lại từ đầu bộ đề đó.</b></p>
       <div class="chip-row" id="jlptLevelRow">
         <button class="chip on" data-lvl="N5">N5</button>
         <button class="chip" data-lvl="N4">N4</button>
@@ -361,18 +380,83 @@ footer.bottom-nav{display:none;}
         <button class="chip" data-lvl="N1">N1</button>
       </div>
       <div class="chip-row" id="jlptTypeRow">
-        <button class="chip on" data-type="vocab">Từ vựng</button>
-        <button class="chip" data-type="kanji">Kanji</button>
-        <button class="chip" data-type="grammar">Ngữ pháp</button>
+        <button class="chip on" data-type="vocab">📖 Từ vựng</button>
+        <button class="chip" data-type="kanji">漢 Kanji</button>
+        <button class="chip" data-type="grammar">📝 Ngữ pháp</button>
+        <button class="chip" data-type="custom">📌 Đề tự tạo</button>
       </div>
-      <button class="btn accent" id="jlptStart">Bắt đầu luyện đề</button>
     </div>
+    <div id="jlptSetList"></div>
     <div id="jlptArea"></div>
   </div>
 
+  <!-- LUYỆN ĐỌC: chọn cấp độ -> chọn bài -> đọc + trả lời câu hỏi -->
   <div id="practice-reading" class="practice-pane hidden">
-    <div class="chip-row" id="readingList"></div>
+    <div class="card">
+      <b>📰 Luyện đọc</b>
+      <p class="muted" style="font-size:.85rem;">Chọn cấp độ để xem danh sách bài đọc. Mỗi bài có vài câu hỏi hiểu bài nhỏ sau khi đọc xong.</p>
+      <div class="chip-row" id="readingLevelRow">
+        <button class="chip on" data-lvl="N5">N5</button>
+        <button class="chip" data-lvl="N4">N4</button>
+        <button class="chip" data-lvl="N3">N3</button>
+        <button class="chip" data-lvl="N2">N2</button>
+        <button class="chip" data-lvl="N1">N1</button>
+      </div>
+    </div>
+    <div id="readingSetList"></div>
     <div id="readingArea"></div>
+  </div>
+
+  <!-- THÊM ĐỀ -->
+  <div id="practice-addset" class="practice-pane hidden">
+    <div class="card">
+      <h3>➕ Thêm bộ đề của riêng bạn</h3>
+      <p class="muted" style="font-size:.85rem;">Tự soạn bộ đề trắc nghiệm — sẽ xuất hiện trong mục "🎯 Luyện JLPT" ở cấp độ và mục "📌 Đề tự tạo".</p>
+      <div class="two-col">
+        <input type="text" id="asTitle" placeholder="Tên bộ đề (VD: Ôn tập bài 5)">
+        <select id="asLevel"><option>N5</option><option>N4</option><option>N3</option><option>N2</option><option>N1</option></select>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Thêm từng câu hỏi</h3>
+      <input type="text" id="asQ" placeholder="Câu hỏi" style="width:100%;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-bottom:.4rem;">
+      <div class="two-col">
+        <input type="text" id="asOpt1" placeholder="Đáp án đúng">
+        <input type="text" id="asOpt2" placeholder="Đáp án sai 1">
+        <input type="text" id="asOpt3" placeholder="Đáp án sai 2">
+        <input type="text" id="asOpt4" placeholder="Đáp án sai 3">
+      </div>
+      <input type="text" id="asExplain" placeholder="Giải thích (không bắt buộc)" style="width:100%;padding:.6rem;border:1px solid var(--line);border-radius:8px;background:var(--card);margin-top:.4rem;">
+      <div class="row-actions"><button class="btn primary" id="asAddQBtn">➕ Thêm câu hỏi vào bộ đề</button></div>
+      <div id="asQList" class="muted" style="font-size:.85rem;margin-top:.5rem;"></div>
+    </div>
+    <div class="card">
+      <h3>📋 Hoặc nhập hàng loạt</h3>
+      <p class="muted" style="font-size:.85rem;">Mỗi dòng 1 câu, định dạng: <code>Câu hỏi|Đáp án đúng|Sai 1|Sai 2|Sai 3|Giải thích</code></p>
+      <textarea class="note" id="asBulk" placeholder="この漢字の読み方は？|きょう|あす|きのう|らいしゅう|Giải thích nếu muốn" style="min-height:90px;"></textarea>
+      <div class="row-actions"><button id="asBulkBtn">📥 Nhập hàng loạt vào bộ đề</button></div>
+    </div>
+    <div class="row-actions">
+      <button class="btn accent" id="asSaveBtn">💾 Lưu bộ đề</button>
+      <button id="asClearBtn">Xóa hết & làm lại</button>
+    </div>
+    <div id="asSaveResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
+    <div class="section-title"><span>Bộ đề bạn đã tạo</span></div>
+    <div id="myExamSetsList"></div>
+  </div>
+
+  <!-- TIẾN ĐỘ -->
+  <div id="practice-progress" class="practice-pane hidden">
+    <div class="card">
+      <h3>📊 Tiến độ học tập</h3>
+      <p class="muted" style="font-size:.85rem;">Tính dựa trên các bộ đề JLPT bạn đã làm (đạt nghĩa là hoàn thành mà không phải làm lại).</p>
+    </div>
+    <div id="progressBars"></div>
+    <div class="card">
+      <h3>Lịch sử điểm gần đây</h3>
+      <div id="progressHistory"></div>
+      <div class="row-actions"><button id="progressResetBtn">🗑 Reset toàn bộ tiến độ</button></div>
+    </div>
   </div>
 </section>
 
@@ -400,6 +484,24 @@ footer.bottom-nav{display:none;}
     </table>
   </div>
   <div class="card">
+    <h3>🖼 Ảnh nền (giao diện Thủy Mặc & Trúc)</h3>
+    <p class="muted" style="font-size:.85rem;">NionVN mặc định dùng ảnh nền phong cách tranh thủy mặc kết hợp trúc. Bạn có thể đổi sang ảnh của riêng mình.</p>
+    <div style="display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;margin:.5rem 0;">
+      <img id="bgPreview" style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--line);">
+      <div style="flex:1;min-width:160px;">
+        <label>Độ đậm nền (nền càng mờ, chữ càng dễ đọc)</label>
+        <input type="range" id="setBgOpacity" min="50" max="97" value="88" style="width:100%;">
+      </div>
+    </div>
+    <div class="row-actions">
+      <label class="btn" style="cursor:pointer;">📁 Tải ảnh của bạn
+        <input type="file" id="bgUploadInput" accept="image/*" class="hidden">
+      </label>
+      <button id="bgResetBtn">↺ Dùng ảnh mặc định (Thủy Mặc & Trúc)</button>
+    </div>
+    <div id="bgUploadStatus" class="muted" style="font-size:.8rem;margin-top:.4rem;"></div>
+  </div>
+  <div class="card">
     <h3>Dữ liệu cá nhân</h3>
     <p class="muted" style="font-size:.85rem;">NionVN <b>tự động lưu</b> lịch sử, từ yêu thích, danh sách học và ghi chú ngay trên trình duyệt của máy bạn (localStorage) — mở lại app là dữ liệu vẫn còn, không cần nhập lại. Dữ liệu chỉ nằm trên máy bạn, không gửi đi đâu cả. Nút xuất/nhập bên dưới dùng để sao lưu hoặc chuyển dữ liệu sang máy/trình duyệt khác.</p>
     <div class="row-actions">
@@ -409,6 +511,16 @@ footer.bottom-nav{display:none;}
       </label>
       <button class="btn" id="clearData">🗑 Xóa toàn bộ dữ liệu cá nhân</button>
     </div>
+  </div>
+  <div class="card">
+    <h3>🤖 Dịch AI (LibreTranslate)</h3>
+    <p class="muted" style="font-size:.85rem;">Tính năng "Dịch AI" trong tab Dịch cần một máy chủ LibreTranslate và (thường là) một API key miễn phí. Lấy key miễn phí tại <a href="https://portal.libretranslate.com" target="_blank">portal.libretranslate.com</a>, hoặc dùng máy chủ cộng đồng khác/tự host nếu bạn có. Cần có mạng khi dùng — nếu để trống hoặc mất mạng, nút "Dịch (từ điển offline)" vẫn hoạt động bình thường như cũ.</p>
+    <div class="two-col">
+      <input type="text" id="setLtUrl" placeholder="Địa chỉ máy chủ (VD: https://libretranslate.com)">
+      <input type="password" id="setLtKey" placeholder="API key (nếu máy chủ yêu cầu)">
+    </div>
+    <div class="row-actions"><button class="btn" id="ltTestBtn">🔌 Kiểm tra kết nối</button></div>
+    <div id="ltTestResult" class="muted" style="font-size:.85rem;margin-top:.4rem;"></div>
   </div>
   <div class="card">
     <h3>Về NionVN</h3>
